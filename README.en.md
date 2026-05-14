@@ -17,6 +17,19 @@ The goal is not just page backup. The goal is to create readable, linkable, and 
 - Download X article videos into a local `video/` directory when possible.
 - Clean filenames and paths for Obsidian usage.
 
+## Platform Status
+
+| Platform | Status | Current Support | Command | Notes |
+| --- | --- | --- | --- | --- |
+| X/Twitter | Done | Single longform article retrieval, local images, best-effort local videos | `content-capture x article` | Single article only. X user batch retrieval is not supported. |
+| WeChat Official Account | Done | Single articles, collection articles, child article grouping, local images | `content-capture wechat` | WeChat videos are not downloaded. Verification pages require retrying later. |
+| Normal web pages | Done | Article Markdown extraction, local images, Defuddle fallback | `content-capture web` | Best for static article pages. Dynamic pages depend on page structure. |
+| Xiaohongshu | Not done | Not supported yet | None | Planned for image/video resource retrieval. |
+| Douyin | Not done | Not supported yet | None | Planned for video resource retrieval. |
+| Bilibili | Not done | Not supported yet | None | Planned for video, article, or collection retrieval. |
+| WeChat Channels | Not done | Not supported yet | None | Planned for public video resource retrieval. |
+| YouTube | Not done | Not supported yet | None | Planned for videos, subtitles, and descriptions. |
+
 ## Installation
 
 Recommended Homebrew installation:
@@ -45,6 +58,28 @@ defuddle parse https://example.com/article --md
 ```
 
 X only supports single-article retrieval through the free conversion path.
+
+## Start Here
+
+If you only want to save one piece of content into Obsidian, choose the platform command and set an output directory:
+
+| Content | Command |
+| --- | --- |
+| X longform article | `content-capture x article <x-url-or-id> --out <output-dir>` |
+| Single WeChat article | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
+| WeChat collection knowledge base | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
+| Normal web article | `content-capture web <url> --out <output-dir>` |
+
+For a first run, point `--out` to a temporary directory such as `out/test`. After checking the Markdown, image paths, and folder structure, point `--out` to the final folder inside your Obsidian vault.
+
+## Current Limits
+
+- Platforms marked as not done do not have command entries yet. Passing those links will not produce complete output.
+- Use `content-capture wechat` for WeChat Official Account articles. Do not use `content-capture web` for WeChat articles.
+- The normal web page Defuddle fallback requires `defuddle` to be installed locally.
+- X single-article retrieval depends on a public conversion path. If that service is unavailable, that article can fail.
+- WeChat videos are not downloaded. The current output focuses on text, images, and article structure.
+- Asset links are relative by default for Obsidian vault portability. Use `--absolute-asset-paths` only when your previewer cannot resolve relative paths.
 
 ## Usage
 

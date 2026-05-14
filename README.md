@@ -17,6 +17,19 @@
 - X 文章视频会尽量下载到本地 `video/` 目录。
 - 文件名和路径会做清理，适合放进 Obsidian。
 
+## 平台支持状态
+
+| 平台 | 状态 | 当前支持 | 命令入口 | 说明 |
+| --- | --- | --- | --- | --- |
+| X/Twitter | 已完成 | 单篇长文获取，图片本地化，视频尽量本地化 | `content-capture x article` | 只支持单篇文章，不支持按用户批量获取。 |
+| 微信公众号 | 已完成 | 单篇文章、合集文章、子文章目录归类、图片本地化 | `content-capture wechat` | 微信视频不下载；遇到验证页需要稍后重试。 |
+| 普通网页 | 已完成 | 网页正文转 Markdown，图片本地化，Defuddle 兜底 | `content-capture web` | 适合静态文章页；动态页面效果取决于页面结构。 |
+| 小红书 | 未完成 | 暂不支持 | 暂无 | 后续计划支持图文/视频资源获取。 |
+| 抖音 | 未完成 | 暂不支持 | 暂无 | 后续计划支持视频资源获取。 |
+| B 站 | 未完成 | 暂不支持 | 暂无 | 后续计划支持视频、专栏或合集资源获取。 |
+| 视频号 | 未完成 | 暂不支持 | 暂无 | 后续计划支持公开视频资源获取。 |
+| YouTube | 未完成 | 暂不支持 | 暂无 | 后续计划支持视频、字幕和描述信息获取。 |
+
 ## 安装
 
 推荐用 Homebrew 安装：
@@ -45,6 +58,28 @@ defuddle parse https://example.com/article --md
 ```
 
 X 只支持单篇文章获取，默认走免费转换路径。
+
+## 新用户先看这里
+
+如果你只是想把一篇内容放进 Obsidian，通常只需要选择一个平台入口，再指定输出目录：
+
+| 你要获取的内容 | 使用命令 |
+| --- | --- |
+| X 单篇长文 | `content-capture x article <x-url-or-id> --out <output-dir>` |
+| 微信公众号单篇文章 | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
+| 微信公众号合集知识库 | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
+| 普通网页文章 | `content-capture web <url> --out <output-dir>` |
+
+建议第一次使用时，把 `--out` 指向一个临时目录，例如 `out/test`。确认 Markdown、图片路径和目录结构符合预期后，再把 `--out` 指向 Obsidian vault 里的正式目录。
+
+## 当前边界
+
+- 未完成的平台还没有命令入口，传入这些平台的链接不会自动获取出完整内容。
+- 微信公众号请优先使用 `content-capture wechat`，不要用 `content-capture web` 处理公众号文章。
+- 普通网页的 Defuddle 兜底依赖你本机已经安装 `defuddle`。
+- X 单篇文章依赖公开转换路径；如果转换服务暂时不可用，该篇文章会失败。
+- 微信公众号视频当前不下载，输出重点是文字、图片和文章目录结构。
+- 资源默认使用相对路径，适合放进 Obsidian vault；如果你的预览器不识别相对路径，再使用 `--absolute-asset-paths`。
 
 ## 基本命令
 
