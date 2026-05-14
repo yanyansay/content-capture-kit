@@ -24,7 +24,7 @@ Recommended Homebrew installation:
 
 ```bash
 brew tap yanyansay/content-capture-kit https://github.com/yanyansay/content-capture-kit
-brew install --HEAD content-capture-kit
+brew install content-capture-kit
 ```
 
 After installation, use the unified command:

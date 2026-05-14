@@ -24,7 +24,7 @@
 
 ```bash
 brew tap yanyansay/content-capture-kit https://github.com/yanyansay/content-capture-kit
-brew install --HEAD content-capture-kit
+brew install content-capture-kit
 ```
 
 安装完成后使用统一命令：
