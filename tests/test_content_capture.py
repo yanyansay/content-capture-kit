@@ -8,16 +8,16 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from x_crawler.assets import absolutize_local_asset_links, localize_markdown_assets
-from x_crawler.defuddle import parse_url_to_markdown, slug_from_url
-from x_crawler.cli import main
-from x_crawler.longform import longform_from_tweet
-from x_crawler.preview import markdown_to_preview_html
-from x_crawler.render import render_longform_document, render_single_longform
-from x_crawler.wechat import extract_wechat_article_links
-from x_crawler.x_api import XApiClient, extract_tweet_id, is_x_url, normalize_user_input
-from x_crawler.html_markdown import extract_article_markdown
-from x_crawler.xtomd import fetch_x_markdown_to_file
+from content_capture.assets import absolutize_local_asset_links, localize_markdown_assets
+from content_capture.defuddle import parse_url_to_markdown, slug_from_url
+from content_capture.cli import main
+from content_capture.longform import longform_from_tweet
+from content_capture.preview import markdown_to_preview_html
+from content_capture.render import render_longform_document, render_single_longform
+from content_capture.wechat import extract_wechat_article_links
+from content_capture.x_api import XApiClient, extract_tweet_id, is_x_url, normalize_user_input
+from content_capture.html_markdown import extract_article_markdown
+from content_capture.xtomd import fetch_x_markdown_to_file
 
 
 class ParsingTests(unittest.TestCase):
@@ -301,7 +301,7 @@ Line 2</code></pre></shiki-code>
             raise AssertionError(url)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("x_crawler.wechat.fetch_url_html", side_effect=fake_fetch):
+            with patch("content_capture.wechat.fetch_url_html", side_effect=fake_fetch):
                 status = main(
                     [
                         "wechat",
@@ -338,7 +338,7 @@ Line 2</code></pre></shiki-code>
         """
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("x_crawler.wechat.fetch_url_html", side_effect=[seed_html, child_html]):
+            with patch("content_capture.wechat.fetch_url_html", side_effect=[seed_html, child_html]):
                 status = main(
                     [
                         "wechat",
@@ -504,7 +504,7 @@ Line 2</code></pre></shiki-code>
             self.assertIn('Open video file', content)
 
     def test_html_title_prefers_og_title(self) -> None:
-        from x_crawler.naming import html_title
+        from content_capture.naming import html_title
 
         title = html_title('<meta property="og:title" content="Codex + image-2 视频产出工作流分享" />')
         self.assertEqual(title, "Codex + image-2 视频产出工作流分享")

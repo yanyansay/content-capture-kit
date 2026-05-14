@@ -18,12 +18,31 @@ from .xtomd import fetch_x_markdown
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m x_crawler",
-        description="Fetch X longform posts and web articles as Markdown.",
+        prog="content-capture",
+        description="Capture X, WeChat, and web articles as Markdown.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    article = subparsers.add_parser("article", help="Fetch one X post by URL or post id.")
+    x = subparsers.add_parser("x", help="Capture X/Twitter content.")
+    x_subparsers = x.add_subparsers(dest="x_command", required=True)
+    _add_article_parser(x_subparsers, aliases=False)
+    _add_user_parser(x_subparsers, aliases=False)
+
+    _add_wechat_parser(subparsers)
+    _add_web_parser(subparsers)
+
+    _add_article_parser(subparsers, aliases=True)
+    _add_user_parser(subparsers, aliases=True)
+    _add_url_parser(subparsers)
+
+    return parser
+
+
+def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool) -> argparse.ArgumentParser:
+    help_text = "Fetch one X post by URL or post id."
+    if aliases:
+        help_text += " Alias for: content-capture x article."
+    article = subparsers.add_parser("article", help=help_text)
     article.add_argument("tweet", help="X status URL or numeric tweet id.")
     article.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
     article.add_argument(
@@ -53,15 +72,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Generate a sibling HTML preview file that can play local video assets.",
     )
+    return article
 
-    user = subparsers.add_parser("user", help="Fetch the latest N longform posts from a user.")
+
+def _add_user_parser(subparsers: argparse._SubParsersAction, *, aliases: bool) -> argparse.ArgumentParser:
+    help_text = "Fetch the latest N longform posts from an X user."
+    if aliases:
+        help_text += " Alias for: content-capture x user."
+    user = subparsers.add_parser("user", help=help_text)
     user.add_argument("user", help="X handle, @handle, profile URL, or numeric user id.")
     user.add_argument("--count", type=int, default=10, help="Number of longform posts to collect.")
     user.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
     user.add_argument("--include-replies", action="store_true", help="Include replies in timeline scanning.")
     user.add_argument("--max-pages", type=int, default=50, help="Safety cap for timeline pages.")
+    return user
 
-    url = subparsers.add_parser("url", help="Fetch a normal web URL with Defuddle, or X URL via API.")
+
+def _add_web_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    web = subparsers.add_parser("web", help="Fetch a normal web URL with Defuddle fallback.")
+    _add_url_arguments(web)
+    return web
+
+
+def _add_url_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    url = subparsers.add_parser("url", help="Fetch a URL. Alias for web URLs; X URLs are routed to X capture.")
+    _add_url_arguments(url)
+    return url
+
+
+def _add_url_arguments(url: argparse.ArgumentParser) -> None:
     url.add_argument("url", help="URL to fetch.")
     url.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
     url.add_argument(
@@ -82,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate a sibling HTML preview file.",
     )
 
+
+def _add_wechat_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     wechat = subparsers.add_parser("wechat", help="Export a WeChat article and linked WeChat articles as a knowledge base.")
     wechat.add_argument("url", help="WeChat article URL.")
     wechat.add_argument("--out", default="out/wechat-kb", help="Output directory. Defaults to ./out/wechat-kb.")
@@ -103,8 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Generate sibling HTML preview files.",
     )
-
-    return parser
+    return wechat
 
 
 def _client_from_env() -> XApiClient:
@@ -122,8 +162,11 @@ def _ensure_count(value: int) -> None:
 def run(args: argparse.Namespace) -> Path:
     output_dir = Path(args.out)
     output_path: Path
+    command = args.command
+    if command == "x":
+        command = args.x_command
 
-    if args.command == "article":
+    if command == "article":
         if args.mirror_url:
             tweet_id = extract_tweet_id(args.tweet)
             markdown = fetch_url_markdown(args.mirror_url)
@@ -164,7 +207,7 @@ def run(args: argparse.Namespace) -> Path:
             markdown_to_preview_html(output_path)
         return output_path
 
-    if args.command == "user":
+    if command == "user":
         _ensure_count(args.count)
         client = _client_from_env()
         result = client.fetch_user_longform_posts(
@@ -175,7 +218,7 @@ def run(args: argparse.Namespace) -> Path:
         )
         return render_longform_document(result, output_dir)
 
-    if args.command == "url":
+    if command in {"url", "web"}:
         if is_x_url(args.url):
             try:
                 markdown = fetch_x_markdown(args.url)
@@ -212,7 +255,7 @@ def run(args: argparse.Namespace) -> Path:
             html_preview=args.html_preview,
         )
 
-    if args.command == "wechat":
+    if command == "wechat":
         if args.max_links < 0:
             raise XApiError("--max-links must be at least 0.")
         result = export_wechat_knowledge_base(
@@ -225,7 +268,7 @@ def run(args: argparse.Namespace) -> Path:
         )
         return result.index_path
 
-    raise XApiError(f"Unsupported command: {args.command}")
+    raise XApiError(f"Unsupported command: {command}")
 
 
 def main(argv: list[str] | None = None) -> int:

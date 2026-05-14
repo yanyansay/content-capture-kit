@@ -18,15 +18,28 @@
 - X 文章视频会尽量下载到本地 `video/` 目录。
 - 文件名和路径会做清理，适合放进 Obsidian。
 
-## 环境准备
+## 安装
 
-进入项目目录：
+推荐用 Homebrew 安装：
 
 ```bash
-cd /path/to/content-capture-kit
+brew tap yanyansay/content-capture-kit https://github.com/yanyansay/content-capture-kit
+brew install --HEAD content-capture-kit
 ```
 
-普通网页抓取依赖本机 Defuddle：
+安装完成后使用统一命令：
+
+```bash
+content-capture --help
+```
+
+也可以在项目目录中本地运行：
+
+```bash
+python3 -m pip install -e .
+```
+
+普通网页抓取依赖本机 Defuddle，安装后工具会在需要时调用：
 
 ```bash
 defuddle parse https://example.com/article --md
@@ -43,13 +56,13 @@ export X_BEARER_TOKEN="your-token"
 ### 1. 抓取单篇 X 长文
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 --out out
+content-capture x article https://x.com/example_author/status/1234567890123456789 --out out
 ```
 
 如果有镜像页，并且镜像页内容更完整，可以指定镜像：
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 \
+content-capture x article https://x.com/example_author/status/1234567890123456789 \
   --mirror-url https://example.com/mirrored-post \
   --out out
 ```
@@ -66,13 +79,13 @@ python3 -m x_crawler article https://x.com/example_author/status/123456789012345
 这个命令需要官方 X API token。
 
 ```bash
-python3 -m x_crawler user example_author --count 10 --out out
+content-capture x user example_author --count 10 --out out
 ```
 
 也可以传 numeric user id：
 
 ```bash
-python3 -m x_crawler user 123456789 --count 5 --out out
+content-capture x user 123456789 --count 5 --out out
 ```
 
 说明：
@@ -84,7 +97,7 @@ python3 -m x_crawler user 123456789 --count 5 --out out
 ### 3. 抓取普通网页
 
 ```bash
-python3 -m x_crawler url https://example.com/article --out out
+content-capture web https://example.com/article --out out
 ```
 
 说明：
@@ -96,7 +109,7 @@ python3 -m x_crawler url https://example.com/article --out out
 ### 4. 抓取微信公众号单篇文章
 
 ```bash
-python3 -m x_crawler url 'https://mp.weixin.qq.com/s/example_article_id' --out out
+content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out out
 ```
 
 说明：
@@ -111,13 +124,13 @@ python3 -m x_crawler url 'https://mp.weixin.qq.com/s/example_article_id' --out o
 适合入口文章中包含很多篇文章链接的情况。
 
 ```bash
-python3 -m x_crawler wechat 'https://mp.weixin.qq.com/s/example_collection_id' --out out/wechat-kb
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' --out out/wechat-kb
 ```
 
 如果只想导出前 20 个子文章：
 
 ```bash
-python3 -m x_crawler wechat 'https://mp.weixin.qq.com/s/example_collection_id' \
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' \
   --max-links 20 \
   --out out/wechat-kb
 ```
@@ -158,7 +171,7 @@ out/wechat-kb/
 指定输出目录。
 
 ```bash
-python3 -m x_crawler url https://example.com/article --out ~/Documents/Obsidian/Sources
+content-capture web https://example.com/article --out ~/Documents/Obsidian/Sources
 ```
 
 ### `--no-local-assets`
@@ -166,7 +179,7 @@ python3 -m x_crawler url https://example.com/article --out ~/Documents/Obsidian/
 不下载图片/视频，只保留远程链接。
 
 ```bash
-python3 -m x_crawler url https://example.com/article --no-local-assets
+content-capture web https://example.com/article --no-local-assets
 ```
 
 ### `--absolute-asset-paths`
@@ -174,7 +187,7 @@ python3 -m x_crawler url https://example.com/article --no-local-assets
 把资源链接写成绝对路径。适合某些 Markdown 预览器，但不建议作为 Obsidian 长期知识库默认格式。
 
 ```bash
-python3 -m x_crawler url https://example.com/article --absolute-asset-paths
+content-capture web https://example.com/article --absolute-asset-paths
 ```
 
 ### `--no-html-preview`
@@ -182,7 +195,7 @@ python3 -m x_crawler url https://example.com/article --absolute-asset-paths
 不生成 HTML 预览文件。
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 --no-html-preview
+content-capture x article https://x.com/example_author/status/1234567890123456789 --no-html-preview
 ```
 
 ## Obsidian 使用建议

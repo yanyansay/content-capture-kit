@@ -18,15 +18,28 @@ The goal is not just page backup. The goal is to create readable, linkable, and 
 - Download X article videos into a local `video/` directory when possible.
 - Clean filenames and paths for Obsidian usage.
 
-## Setup
+## Installation
 
-Go to the project directory:
+Recommended Homebrew installation:
 
 ```bash
-cd /path/to/content-capture-kit
+brew tap yanyansay/content-capture-kit https://github.com/yanyansay/content-capture-kit
+brew install --HEAD content-capture-kit
 ```
 
-Normal web page extraction may require Defuddle:
+After installation, use the unified command:
+
+```bash
+content-capture --help
+```
+
+For local development, install from the project directory:
+
+```bash
+python3 -m pip install -e .
+```
+
+Normal web page extraction may require Defuddle. The tool calls it when needed:
 
 ```bash
 defuddle parse https://example.com/article --md
@@ -43,13 +56,13 @@ export X_BEARER_TOKEN="your-token"
 ### 1. Export a Single X Longform Post
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 --out out
+content-capture x article https://x.com/example_author/status/1234567890123456789 --out out
 ```
 
 Use a mirror URL when the mirror contains more complete media or code blocks:
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 \
+content-capture x article https://x.com/example_author/status/1234567890123456789 \
   --mirror-url https://example.com/mirrored-post \
   --out out
 ```
@@ -66,13 +79,13 @@ Output behavior:
 This requires an official X API token.
 
 ```bash
-python3 -m x_crawler user example_author --count 10 --out out
+content-capture x user example_author --count 10 --out out
 ```
 
 Numeric user IDs are also supported:
 
 ```bash
-python3 -m x_crawler user 123456789 --count 5 --out out
+content-capture x user 123456789 --count 5 --out out
 ```
 
 Notes:
@@ -84,7 +97,7 @@ Notes:
 ### 3. Export a Normal Web Page
 
 ```bash
-python3 -m x_crawler url https://example.com/article --out out
+content-capture web https://example.com/article --out out
 ```
 
 Notes:
@@ -96,7 +109,7 @@ Notes:
 ### 4. Export a Single WeChat Article
 
 ```bash
-python3 -m x_crawler url 'https://mp.weixin.qq.com/s/example_article_id' --out out
+content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out out
 ```
 
 Notes:
@@ -111,13 +124,13 @@ Notes:
 Use this when an entry article contains many linked WeChat articles.
 
 ```bash
-python3 -m x_crawler wechat 'https://mp.weixin.qq.com/s/example_collection_id' --out out/wechat-kb
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' --out out/wechat-kb
 ```
 
 Limit the number of linked articles:
 
 ```bash
-python3 -m x_crawler wechat 'https://mp.weixin.qq.com/s/example_collection_id' \
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' \
   --max-links 20 \
   --out out/wechat-kb
 ```
@@ -157,7 +170,7 @@ Directory rules:
 Set the output directory.
 
 ```bash
-python3 -m x_crawler url https://example.com/article --out ~/Documents/Obsidian/Sources
+content-capture web https://example.com/article --out ~/Documents/Obsidian/Sources
 ```
 
 ### `--no-local-assets`
@@ -165,7 +178,7 @@ python3 -m x_crawler url https://example.com/article --out ~/Documents/Obsidian/
 Skip image/video downloads and keep remote links.
 
 ```bash
-python3 -m x_crawler url https://example.com/article --no-local-assets
+content-capture web https://example.com/article --no-local-assets
 ```
 
 ### `--absolute-asset-paths`
@@ -173,7 +186,7 @@ python3 -m x_crawler url https://example.com/article --no-local-assets
 Write asset links as absolute filesystem paths. This can help some Markdown previewers, but relative paths are better for long-term Obsidian vaults.
 
 ```bash
-python3 -m x_crawler url https://example.com/article --absolute-asset-paths
+content-capture web https://example.com/article --absolute-asset-paths
 ```
 
 ### `--no-html-preview`
@@ -181,7 +194,7 @@ python3 -m x_crawler url https://example.com/article --absolute-asset-paths
 Skip HTML preview generation.
 
 ```bash
-python3 -m x_crawler article https://x.com/example_author/status/1234567890123456789 --no-html-preview
+content-capture x article https://x.com/example_author/status/1234567890123456789 --no-html-preview
 ```
 
 ## Obsidian Tips

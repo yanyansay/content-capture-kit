@@ -1,1 +1,1 @@
-"""Tests for x_crawler."""
+"""Tests for content_capture."""

@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 [project.scripts]
-content-capture = "x_crawler.cli:main"
+content-capture = "content_capture.cli:main"
 
 [tool.setuptools]
-packages = ["x_crawler"]
+packages = ["content_capture"]
