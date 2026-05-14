@@ -4,8 +4,8 @@ class ContentCaptureKit < Formula
   desc "Get X, WeChat, and web articles as Markdown for knowledge bases"
   homepage "https://github.com/yanyansay/content-capture-kit"
   url "https://github.com/yanyansay/content-capture-kit.git",
-      tag:      "v0.1.0",
-      revision: "4c050ee99fbe0cfd0d617a839be32bf59fee92cd"
+      tag:      "v0.1.1",
+      revision: "c8acc5018a9cf013bf6e1c7fdb51a37c999e17f8"
   head "https://github.com/yanyansay/content-capture-kit.git", branch: "main"
 
   depends_on "python@3.12"
