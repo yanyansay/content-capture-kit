@@ -17,20 +17,6 @@ class LongformPost:
     metrics: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class UserLongformResult:
-    user_input: str
-    user_id: str
-    username: str
-    display_name: str | None
-    requested_count: int
-    posts: list[LongformPost]
-    scanned_count: int
-    skipped_short_count: int
-    pages_scanned: int
-    complete: bool
-
-
 def _first_string(value: Any, keys: tuple[str, ...]) -> str:
     if isinstance(value, str):
         return value.strip()

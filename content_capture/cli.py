@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -10,50 +9,41 @@ from .assets import localize_markdown_assets
 from .defuddle import fetch_url_markdown, fetch_url_title
 from .naming import markdown_title
 from .preview import markdown_to_preview_html
-from .render import render_longform_document, render_single_longform
 from .wechat import WechatExportError, export_wechat_knowledge_base
-from .x_api import XApiClient, XApiError, extract_tweet_id, is_x_url
+from .x_utils import XArticleError, extract_tweet_id, is_x_url
 from .xtomd import fetch_x_markdown
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="content-capture",
-        description="Capture X, WeChat, and web articles as Markdown.",
+        description="Get X, WeChat, and web articles as Markdown.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    x = subparsers.add_parser("x", help="Capture X/Twitter content.")
+    x = subparsers.add_parser("x", help="Get a single X/Twitter article.")
     x_subparsers = x.add_subparsers(dest="x_command", required=True)
     _add_article_parser(x_subparsers, aliases=False)
-    _add_user_parser(x_subparsers, aliases=False)
 
     _add_wechat_parser(subparsers)
     _add_web_parser(subparsers)
 
     _add_article_parser(subparsers, aliases=True)
-    _add_user_parser(subparsers, aliases=True)
     _add_url_parser(subparsers)
 
     return parser
 
 
 def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool) -> argparse.ArgumentParser:
-    help_text = "Fetch one X post by URL or post id."
+    help_text = "Get one X article by URL or post id."
     if aliases:
         help_text += " Alias for: content-capture x article."
     article = subparsers.add_parser("article", help=help_text)
     article.add_argument("tweet", help="X status URL or numeric tweet id.")
     article.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
     article.add_argument(
-        "--source",
-        choices=("auto", "xtomd", "api"),
-        default="auto",
-        help="Fetch source. auto tries unpaid xtomd first, then X API when a token exists.",
-    )
-    article.add_argument(
         "--mirror-url",
-        help="Fetch Markdown from a mirrored article URL but save it under the X tweet id filename.",
+        help="Get Markdown from a mirrored article URL but save it under the X tweet id filename.",
     )
     article.add_argument(
         "--local-assets",
@@ -75,33 +65,20 @@ def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool
     return article
 
 
-def _add_user_parser(subparsers: argparse._SubParsersAction, *, aliases: bool) -> argparse.ArgumentParser:
-    help_text = "Fetch the latest N longform posts from an X user."
-    if aliases:
-        help_text += " Alias for: content-capture x user."
-    user = subparsers.add_parser("user", help=help_text)
-    user.add_argument("user", help="X handle, @handle, profile URL, or numeric user id.")
-    user.add_argument("--count", type=int, default=10, help="Number of longform posts to collect.")
-    user.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
-    user.add_argument("--include-replies", action="store_true", help="Include replies in timeline scanning.")
-    user.add_argument("--max-pages", type=int, default=50, help="Safety cap for timeline pages.")
-    return user
-
-
 def _add_web_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    web = subparsers.add_parser("web", help="Fetch a normal web URL with Defuddle fallback.")
+    web = subparsers.add_parser("web", help="Get a normal web URL with Defuddle fallback.")
     _add_url_arguments(web)
     return web
 
 
 def _add_url_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    url = subparsers.add_parser("url", help="Fetch a URL. Alias for web URLs; X URLs are routed to X capture.")
+    url = subparsers.add_parser("url", help="Get a URL. Alias for web URLs; X URLs are routed to X article mode.")
     _add_url_arguments(url)
     return url
 
 
 def _add_url_arguments(url: argparse.ArgumentParser) -> None:
-    url.add_argument("url", help="URL to fetch.")
+    url.add_argument("url", help="URL to get.")
     url.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
     url.add_argument(
         "--local-assets",
@@ -147,21 +124,8 @@ def _add_wechat_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     return wechat
 
 
-def _client_from_env() -> XApiClient:
-    token = os.environ.get("X_BEARER_TOKEN", "").strip()
-    if not token:
-        raise XApiError("X_BEARER_TOKEN is required for X API commands.")
-    return XApiClient(token)
-
-
-def _ensure_count(value: int) -> None:
-    if value < 1:
-        raise XApiError("--count must be at least 1.")
-
-
 def run(args: argparse.Namespace) -> Path:
     output_dir = Path(args.out)
-    output_path: Path
     command = args.command
     if command == "x":
         command = args.x_command
@@ -182,67 +146,29 @@ def run(args: argparse.Namespace) -> Path:
                 html_preview=args.html_preview,
                 fallback_filename=tweet_id,
             )
-        if args.source in {"auto", "xtomd"}:
-            try:
-                markdown = fetch_x_markdown(args.tweet if not args.tweet.strip().isdigit() else f"https://x.com/i/status/{args.tweet.strip()}")
-                return write_article_output(
-                    markdown,
-                    output_dir,
-                    source_url=args.tweet,
-                    local_assets=args.local_assets,
-                    absolute_asset_paths=args.absolute_asset_paths,
-                    html_preview=args.html_preview,
-                    fallback_filename=extract_tweet_id(args.tweet),
-                )
-            except XApiError:
-                if args.source == "xtomd" or not os.environ.get("X_BEARER_TOKEN", "").strip():
-                    raise
-        client = _client_from_env()
-        tweet_id = extract_tweet_id(args.tweet)
-        post = client.fetch_post(tweet_id)
-        output_path = render_single_longform(post, output_dir)
-        if args.local_assets:
-            localize_markdown_assets(output_path, absolute_paths=args.absolute_asset_paths)
-        if args.html_preview:
-            markdown_to_preview_html(output_path)
-        return output_path
-
-    if command == "user":
-        _ensure_count(args.count)
-        client = _client_from_env()
-        result = client.fetch_user_longform_posts(
-            args.user,
-            count=args.count,
-            include_replies=args.include_replies,
-            max_pages=args.max_pages,
+        markdown = fetch_x_markdown(args.tweet if not args.tweet.strip().isdigit() else f"https://x.com/i/status/{args.tweet.strip()}")
+        return write_article_output(
+            markdown,
+            output_dir,
+            source_url=args.tweet,
+            local_assets=args.local_assets,
+            absolute_asset_paths=args.absolute_asset_paths,
+            html_preview=args.html_preview,
+            fallback_filename=extract_tweet_id(args.tweet),
         )
-        return render_longform_document(result, output_dir)
 
     if command in {"url", "web"}:
         if is_x_url(args.url):
-            try:
-                markdown = fetch_x_markdown(args.url)
-                return write_article_output(
-                    markdown,
-                    output_dir,
-                    source_url=args.url,
-                    local_assets=args.local_assets,
-                    absolute_asset_paths=args.absolute_asset_paths,
-                    html_preview=args.html_preview,
-                    fallback_filename=extract_tweet_id(args.url),
-                )
-            except XApiError:
-                if not os.environ.get("X_BEARER_TOKEN", "").strip():
-                    raise
-                client = _client_from_env()
-                tweet_id = extract_tweet_id(args.url)
-                post = client.fetch_post(tweet_id)
-                output_path = render_single_longform(post, output_dir)
-                if args.local_assets:
-                    localize_markdown_assets(output_path, absolute_paths=args.absolute_asset_paths)
-                if args.html_preview:
-                    markdown_to_preview_html(output_path)
-                return output_path
+            markdown = fetch_x_markdown(args.url)
+            return write_article_output(
+                markdown,
+                output_dir,
+                source_url=args.url,
+                local_assets=args.local_assets,
+                absolute_asset_paths=args.absolute_asset_paths,
+                html_preview=args.html_preview,
+                fallback_filename=extract_tweet_id(args.url),
+            )
         markdown = fetch_url_markdown(args.url)
         title = fetch_url_title(args.url)
         return write_article_output(
@@ -257,7 +183,7 @@ def run(args: argparse.Namespace) -> Path:
 
     if command == "wechat":
         if args.max_links < 0:
-            raise XApiError("--max-links must be at least 0.")
+            raise XArticleError("--max-links must be at least 0.")
         result = export_wechat_knowledge_base(
             args.url,
             output_dir,
@@ -268,7 +194,7 @@ def run(args: argparse.Namespace) -> Path:
         )
         return result.index_path
 
-    raise XApiError(f"Unsupported command: {command}")
+    raise XArticleError(f"Unsupported command: {command}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -276,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         path = run(args)
-    except (OSError, ValueError, XApiError, WechatExportError) as error:
+    except (OSError, ValueError, XArticleError, WechatExportError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 

@@ -1,7 +1,7 @@
 class ContentCaptureKit < Formula
   include Language::Python::Virtualenv
 
-  desc "Capture X, WeChat, and web articles as Markdown for knowledge bases"
+  desc "Get X, WeChat, and web articles as Markdown for knowledge bases"
   homepage "https://github.com/yanyansay/content-capture-kit"
   url "https://github.com/yanyansay/content-capture-kit.git",
       tag:      "v0.1.0",
@@ -15,6 +15,6 @@ class ContentCaptureKit < Formula
   end
 
   test do
-    assert_match "Capture X, WeChat, and web articles", shell_output("#{bin}/content-capture --help")
+    assert_match "Get X, WeChat, and web articles", shell_output("#{bin}/content-capture --help")
   end
 end

@@ -3,7 +3,6 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
-import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest.mock import patch
@@ -13,9 +12,9 @@ from content_capture.defuddle import parse_url_to_markdown, slug_from_url
 from content_capture.cli import main
 from content_capture.longform import longform_from_tweet
 from content_capture.preview import markdown_to_preview_html
-from content_capture.render import render_longform_document, render_single_longform
+from content_capture.render import render_single_longform
 from content_capture.wechat import extract_wechat_article_links
-from content_capture.x_api import XApiClient, extract_tweet_id, is_x_url, normalize_user_input
+from content_capture.x_utils import extract_tweet_id, is_x_url
 from content_capture.html_markdown import extract_article_markdown
 from content_capture.xtomd import fetch_x_markdown_to_file
 
@@ -26,9 +25,7 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(extract_tweet_id("https://x.com/foo/status/987654321?s=20"), "987654321")
         self.assertEqual(extract_tweet_id("https://twitter.com/foo/statuses/111222333"), "111222333")
 
-    def test_normalizes_user_input(self) -> None:
-        self.assertEqual(normalize_user_input("@jack"), "jack")
-        self.assertEqual(normalize_user_input("https://x.com/jack"), "jack")
+    def test_identifies_x_urls(self) -> None:
         self.assertTrue(is_x_url("https://x.com/jack/status/1"))
         self.assertFalse(is_x_url("https://example.com/a"))
 
@@ -62,95 +59,6 @@ class LongformTests(unittest.TestCase):
         self.assertIsNone(longform_from_tweet({"id": "3", "text": "short"}))
 
 
-class FakeClient(XApiClient):
-    def __init__(self, payloads: list[dict]) -> None:
-        super().__init__("token", sleep=lambda _: None)
-        self.payloads = payloads
-        self.requests: list[tuple[str, dict | None]] = []
-
-    def request_json(self, path: str, params: dict | None = None) -> dict:
-        self.requests.append((path, params))
-        if path.startswith("/users/by/username/"):
-            return {"data": {"id": "42", "username": "alice", "name": "Alice"}}
-        return self.payloads.pop(0)
-
-
-class XApiFlowTests(unittest.TestCase):
-    def test_user_fetch_collects_only_requested_longform_posts_across_pages(self) -> None:
-        client = FakeClient(
-            [
-                {
-                    "data": [
-                        {"id": "1", "text": "short", "author_id": "42"},
-                        {"id": "2", "note_tweet": {"text": "note 2"}, "author_id": "42"},
-                    ],
-                    "includes": {"users": [{"id": "42", "username": "alice", "name": "Alice"}]},
-                    "meta": {"next_token": "next"},
-                },
-                {
-                    "data": [
-                        {"id": "3", "article": {"title": "title 3", "text": "body 3"}, "author_id": "42"},
-                        {"id": "4", "note_tweet": {"text": "note 4"}, "author_id": "42"},
-                    ],
-                    "includes": {"users": [{"id": "42", "username": "alice", "name": "Alice"}]},
-                    "meta": {},
-                },
-            ]
-        )
-        result = client.fetch_user_longform_posts("alice", count=2)
-        self.assertEqual([post.tweet_id for post in result.posts], ["2", "3"])
-        self.assertEqual(result.scanned_count, 3)
-        self.assertEqual(result.skipped_short_count, 1)
-        self.assertTrue(result.complete)
-        self.assertEqual(client.requests[-1][1]["pagination_token"], "next")
-
-    def test_single_post_fetch_rejects_short_tweet(self) -> None:
-        client = FakeClient([{"data": {"id": "9", "text": "short"}}])
-        with self.assertRaisesRegex(Exception, "not an article"):
-            client.fetch_post("9")
-
-    def test_rate_limit_reset_header_controls_retry_delay(self) -> None:
-        sleeps: list[float] = []
-        client = XApiClient("token", sleep=sleeps.append, now=lambda: 100.0)
-        error = urllib.error.HTTPError(
-            "https://api.x.com/2/test",
-            429,
-            "rate limited",
-            {"x-rate-limit-reset": "130"},
-            None,
-        )
-        try:
-            self.assertEqual(client._retry_delay(error, 0), 31.0)
-        finally:
-            error.close()
-
-    def test_request_tries_fallback_host_after_connection_close(self) -> None:
-        calls: list[str] = []
-
-        class FakeResponse:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self) -> bytes:
-                return b'{"data":{"ok":true}}'
-
-        def fake_urlopen(request, timeout):
-            calls.append(request.full_url)
-            if request.full_url.startswith("https://api.x.com/"):
-                raise urllib.error.URLError("Remote end closed connection without response")
-            return FakeResponse()
-
-        client = XApiClient("token", sleep=lambda _: None, max_retries=0)
-        with patch.object(urllib.request, "urlopen", side_effect=fake_urlopen):
-            payload = client.request_json("/test")
-
-        self.assertEqual(payload, {"data": {"ok": True}})
-        self.assertEqual(calls, ["https://api.x.com/2/test", "https://api.twitter.com/2/test"])
-
-
 class RenderAndDefuddleTests(unittest.TestCase):
     def test_render_single_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,15 +72,6 @@ class RenderAndDefuddleTests(unittest.TestCase):
             self.assertIn("X Longform 1", content)
             self.assertIn("Source:", content)
             self.assertIn("Body", content)
-
-    def test_render_user_document_records_skipped_count(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            client = FakeClient([{"data": [{"id": "2", "note_tweet": {"text": "note"}}], "meta": {}}])
-            result = client.fetch_user_longform_posts("42", count=1)
-            path = render_longform_document(result, Path(temp_dir))
-            content = path.read_text()
-            self.assertIn("Scanned posts: 1", content)
-            self.assertIn("note", content)
 
     def test_defuddle_command_output_is_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
