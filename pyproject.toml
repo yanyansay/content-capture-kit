@@ -1,0 +1,12 @@
+[project]
+name = "content-capture-kit"
+version = "0.1.0"
+description = "Capture content from X, WeChat, and web pages as Markdown for knowledge bases."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+content-capture = "x_crawler.cli:main"
+
+[tool.setuptools]
+packages = ["x_crawler"]
