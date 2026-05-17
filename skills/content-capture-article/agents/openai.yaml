@@ -1,0 +1,4 @@
+interface:
+  display_name: "Content Capture Article"
+  short_description: "Get articles into Obsidian Markdown with content-capture-kit."
+  default_prompt: "Use $content-capture-article to 获取这篇文章 <url>，保存到 Obsidian 指定目录。"

@@ -1,6 +1,6 @@
 [project]
 name = "content-capture-kit"
-version = "0.1.1"
+version = "0.1.6"
 description = "Get content from X, WeChat, and web pages as Markdown for knowledge bases."
 readme = "README.md"
 requires-python = ">=3.11"

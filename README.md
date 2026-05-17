@@ -32,6 +32,26 @@
 
 ## 安装
 
+### npx
+
+如果你只想临时运行，不需要全局安装：
+
+```bash
+npx content-capture-kit --help
+npx content-capture-kit x article https://x.com/example_author/status/1234567890123456789 --out output
+```
+
+也可以用 npm 全局安装，安装后会提供 `content-capture` 命令：
+
+```bash
+npm install -g content-capture-kit
+content-capture --help
+```
+
+环境要求：Node.js 18 或更新版本；本机需要能运行 Python 3.11 或更新版本。npm 包会携带 Python 源码并通过本机 Python 执行，不会自动安装 Python。普通网页获取的 Defuddle 兜底仍需要你本机已安装 `defuddle`。
+
+### Homebrew
+
 推荐用 Homebrew 安装：
 
 ```bash
@@ -45,7 +65,7 @@ brew install content-capture-kit
 content-capture --help
 ```
 
-也可以在项目目录中本地运行：
+### 本地开发
 
 ```bash
 python3 -m pip install -e .
@@ -67,17 +87,18 @@ X 只支持单篇文章获取，默认走免费转换路径。
 | --- | --- |
 | X 单篇长文 | `content-capture x article <x-url-or-id> --out <output-dir>` |
 | 微信公众号单篇文章 | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
-| 微信公众号合集知识库 | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
+| 微信公众号合集知识库 | `content-capture wechat <mp.weixin-url> --deep --out <output-dir>` |
 | 普通网页文章 | `content-capture web <url> --out <output-dir>` |
 
-建议第一次使用时，把 `--out` 指向一个临时目录，例如 `out/test`。确认 Markdown、图片路径和目录结构符合预期后，再把 `--out` 指向 Obsidian vault 里的正式目录。
+建议第一次使用时，把 `--out` 指向一个临时目录，例如 `output/test`。确认 Markdown、图片路径和目录结构符合预期后，再把 `--out` 指向 Obsidian vault 里的正式目录。
 
 ## 当前边界
 
 - 未完成的平台还没有命令入口，传入这些平台的链接不会自动获取出完整内容。
 - 微信公众号请优先使用 `content-capture wechat`，不要用 `content-capture web` 处理公众号文章。
+- `content-capture wechat` 默认只获取单篇文章；只有加 `--deep` 或 `--knowledge-base` 时才按知识库逻辑获取入口文章里的公众号链接。
 - 普通网页的 Defuddle 兜底依赖你本机已经安装 `defuddle`。
-- X 单篇文章依赖公开转换路径；如果转换服务暂时不可用，该篇文章会失败。
+- X 单篇文章会优先使用网页/Defuddle Markdown，以尽量保留代码块；失败时回退公开转换路径。
 - 微信公众号视频当前不下载，输出重点是文字、图片和文章目录结构。
 - 资源默认使用相对路径，适合放进 Obsidian vault；如果你的预览器不识别相对路径，再使用 `--absolute-asset-paths`。
 
@@ -86,7 +107,7 @@ X 只支持单篇文章获取，默认走免费转换路径。
 ### 1. 获取单篇 X 长文
 
 ```bash
-content-capture x article https://x.com/example_author/status/1234567890123456789 --out out
+content-capture x article https://x.com/example_author/status/1234567890123456789 --out output
 ```
 
 如果有镜像页，并且镜像页内容更完整，可以指定镜像：
@@ -94,20 +115,22 @@ content-capture x article https://x.com/example_author/status/123456789012345678
 ```bash
 content-capture x article https://x.com/example_author/status/1234567890123456789 \
   --mirror-url https://example.com/mirrored-post \
-  --out out
+  --out output
 ```
 
 输出规则：
 
-- Markdown 文件按文章标题命名。
-- 图片保存到 `out/image/`。
-- 视频保存到 `out/video/`。
-- 默认生成同名 HTML 预览文件。
+- 会先按作者昵称创建目录。
+- Markdown 文件名使用 `文章标题_文章发布时间.md`。
+- 图片保存到该作者目录下的 `image/`。
+- 视频保存到该作者目录下的 `video/`。
+- 默认只生成 Markdown；加 `--html` 时才生成同名 HTML 预览文件。
+- 如果本机已安装 `defuddle`，X 长文里的代码块通常会被保留；如果回退到公开转换路径，部分代码块可能缺失。
 
 ### 2. 获取普通网页
 
 ```bash
-content-capture web https://example.com/article --out out
+content-capture web https://example.com/article --out output
 ```
 
 说明：
@@ -119,14 +142,17 @@ content-capture web https://example.com/article --out out
 ### 3. 获取微信公众号单篇文章
 
 ```bash
-content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out out
+content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out output
 ```
 
 说明：
 
 - 正文会导出为 Markdown。
-- 图片会下载到本地 `image/`。
+- 会先按作者昵称创建目录。
+- Markdown 文件名使用 `文章标题_文章发布时间.md`。
+- 图片会下载到作者目录下的 `image/`。
 - 微信视频不会下载。
+- 默认不会生成 `微信文章知识库.md`。
 - 如果微信返回“环境异常/去验证”，工具会报错并停止该篇文章导出。
 
 ### 4. 获取微信公众号合集为知识库
@@ -134,47 +160,58 @@ content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out out
 适合入口文章中包含很多篇文章链接的情况。
 
 ```bash
-content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' --out out/wechat-kb
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' --deep --out output/wechat-kb
 ```
 
 如果只想导出前 20 个子文章：
 
 ```bash
 content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' \
+  --deep \
   --max-links 20 \
-  --out out/wechat-kb
+  --out output/wechat-kb
 ```
 
 输出结构示例：
 
 ```text
-out/wechat-kb/
-  入口文章标题/
-    微信文章知识库.md
-    入口文章标题.md
-    需求/
-      子文章标题A.md
-      子文章标题B.md
-    数据分析/
-      子文章标题C.md
-    开发/
-      子文章标题D.md
-    image/
-      image-01-xxxxxxxxxx-640.png
+output/wechat-kb/
+  作者昵称/
+    入口文章标题/
+      微信文章知识库.md
+      入口文章标题_2026-05-13.md
+      需求/
+        子文章标题A_2026-05-14.md
+        子文章标题B_2026-05-15.md
+      数据分析/
+        子文章标题C_2026-05-15.md
+      开发/
+        子文章标题D_2026-05-16.md
+      image/
+        image-01-xxxxxxxxxx-640.png
 ```
 
 目录规则：
 
-- 第一层目录使用入口文章标题。
+- 第一层目录使用作者昵称。
+- 微信合集会在作者目录下再使用入口文章标题创建合集目录。
 - 入口文章本身保存为一个 Markdown 文件。
 - 入口文章中的在线公众号链接会替换为本地 Markdown 相对路径。
 - 子文章会根据入口文章中的二级/三级标题归类。
 - 例如入口文章里有 `## 需求`，其下链接获取回来的文章会进入 `需求/`。
-- 文件名就是文章标题。
+- 文件名使用 `文章标题_文章发布时间.md`，无法识别发布时间时使用 `unknown-date`。
 - 文件名和路径里的空格会被去掉。
 - 未能获取的文章会保留在索引文件的失败区。
 
 ## 常用参数
+
+### `--deep`
+
+把微信公众号入口文章按知识库处理：导出入口文章，并继续获取正文里链接到的公众号子文章。
+
+```bash
+content-capture wechat 'https://mp.weixin.qq.com/s/example_collection_id' --deep
+```
 
 ### `--out`
 
@@ -200,12 +237,12 @@ content-capture web https://example.com/article --no-local-assets
 content-capture web https://example.com/article --absolute-asset-paths
 ```
 
-### `--no-html-preview`
+### `--html`
 
-不生成 HTML 预览文件。
+额外生成同名 HTML 预览文件。默认只生成 Markdown。
 
 ```bash
-content-capture x article https://x.com/example_author/status/1234567890123456789 --no-html-preview
+content-capture x article https://x.com/example_author/status/1234567890123456789 --html
 ```
 
 ## Obsidian 使用建议

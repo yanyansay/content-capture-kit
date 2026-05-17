@@ -1,0 +1,30 @@
+{
+  "name": "content-capture-kit",
+  "version": "0.1.6",
+  "description": "Get X, WeChat, and web articles as Obsidian-friendly Markdown.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanyansay/content-capture-kit.git"
+  },
+  "homepage": "https://github.com/yanyansay/content-capture-kit#readme",
+  "bugs": {
+    "url": "https://github.com/yanyansay/content-capture-kit/issues"
+  },
+  "bin": {
+    "content-capture-kit": "npm/bin/content-capture.js",
+    "content-capture": "npm/bin/content-capture.js"
+  },
+  "files": [
+    "content_capture/*.py",
+    "npm/bin/content-capture.js",
+    "README.md",
+    "README.en.md",
+    "pyproject.toml"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "smoke": "node npm/bin/content-capture.js --help"
+  }
+}

@@ -26,7 +26,7 @@ def fetch_x_markdown(url: str, timeout: float = 60.0) -> str:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read().decode("utf-8").strip()
+            return decode_markdown_response(response.read()).strip()
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise XArticleError(f"xtomd failed with HTTP {error.code}: {detail}") from error
@@ -49,3 +49,7 @@ def fetch_x_markdown_to_file(url_or_id: str, output_dir: Path) -> Path:
     output_path = output_dir / filename
     atomic_write_text(output_path, markdown)
     return output_path
+
+
+def decode_markdown_response(data: bytes) -> str:
+    return data.decode("utf-8", errors="replace")

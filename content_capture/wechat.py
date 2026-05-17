@@ -11,6 +11,7 @@ from .archive import write_article_output
 from .defuddle import fetch_url_html
 from .files import atomic_write_text
 from .html_markdown import decode_wechat_document, extract_article_markdown
+from .metadata import metadata_from_html
 from .naming import compact_filename, html_title
 
 
@@ -151,17 +152,22 @@ def export_wechat_knowledge_base(
     seed_html = fetch_url_html(url)
     _raise_if_wechat_verify_page(seed_html, url)
     seed_title = html_title(seed_html)
-    category_dir = output_dir / compact_filename(seed_title or "微信文章知识库", fallback="微信文章知识库")
+    seed_metadata = metadata_from_html(seed_html)
+    author_dir = output_dir / compact_filename(seed_metadata.author or "unknown-author", fallback="unknown-author")
+    category_dir = author_dir / compact_filename(seed_title or "微信文章知识库", fallback="微信文章知识库")
     category_dir.mkdir(parents=True, exist_ok=True)
     seed_markdown = extract_article_markdown(seed_html, url)
     seed_path = write_article_output(
         seed_markdown,
         category_dir,
         source_url=url,
-        title=compact_filename(seed_title or "入口文章", fallback="入口文章"),
+        title=compact_filename(seed_metadata.title or seed_title or "入口文章", fallback="入口文章"),
+        author=seed_metadata.author,
+        published_at=seed_metadata.published_at,
         local_assets=local_assets,
         absolute_asset_paths=absolute_asset_paths,
         html_preview=html_preview,
+        group_by_author=False,
     )
 
     links = [link for link in extract_wechat_article_links(seed_html, url) if link.url != normalize_wechat_article_url(url)]
@@ -182,7 +188,7 @@ def export_wechat_knowledge_base(
         "",
         "## 文章",
         "",
-        f"- [[{seed_path.stem}]]",
+        f"- [[{_wiki_link_target(seed_path, category_dir)}|{seed_path.stem}]]",
     ]
 
     current_section: str | None = None
@@ -196,22 +202,26 @@ def export_wechat_knowledge_base(
             article_html = fetch_url_html(link.url)
             _raise_if_wechat_verify_page(article_html, link.url)
             title = html_title(article_html) or link.title
+            metadata = metadata_from_html(article_html)
             markdown = extract_article_markdown(article_html, link.url)
             path = write_article_output(
                 markdown,
                 section_dir,
                 source_url=link.url,
-                title=compact_filename(title, fallback=link.title),
+                title=compact_filename(metadata.title or title, fallback=link.title),
+                author=metadata.author or seed_metadata.author,
+                published_at=metadata.published_at,
                 local_assets=local_assets,
                 absolute_asset_paths=absolute_asset_paths,
                 html_preview=html_preview,
                 fallback_filename=compact_filename(link.title, fallback="微信文章"),
+                group_by_author=False,
             )
             article_paths.append(path)
             normalized_url = normalize_wechat_article_url(link.url)
             if normalized_url:
                 local_links[normalized_url] = path
-            index_lines.append(f"- [[{section_name}/{path.stem}|{path.stem}]]")
+            index_lines.append(f"- [[{_wiki_link_target(path, category_dir)}|{path.stem}]]")
         except Exception as error:
             failed.append((link.url, str(error)))
             index_lines.append(f"- 未导出: [{link.title}]({link.url}) - {error}")
@@ -228,9 +238,39 @@ def export_wechat_knowledge_base(
     return WechatExportResult(index_path=index_path, article_paths=article_paths, failed=failed)
 
 
+def export_wechat_article(
+    url: str,
+    output_dir: Path,
+    *,
+    local_assets: bool = True,
+    absolute_asset_paths: bool = False,
+    html_preview: bool = False,
+) -> Path:
+    document = fetch_url_html(url)
+    _raise_if_wechat_verify_page(document, url)
+    title = html_title(document)
+    metadata = metadata_from_html(document)
+    markdown = extract_article_markdown(document, url)
+    return write_article_output(
+        markdown,
+        output_dir,
+        source_url=url,
+        title=compact_filename(metadata.title or title or "微信文章", fallback="微信文章"),
+        author=compact_filename(metadata.author or "unknown-author", fallback="unknown-author"),
+        published_at=metadata.published_at,
+        local_assets=local_assets,
+        absolute_asset_paths=absolute_asset_paths,
+        html_preview=html_preview,
+    )
+
+
 def _raise_if_wechat_verify_page(document: str, url: str) -> None:
     if "环境异常" in document and "去验证" in document:
         raise WechatExportError(f"WeChat verification page returned for {url}. Open it in a browser/WeChat first or retry later.")
+
+
+def _wiki_link_target(path: Path, base_dir: Path) -> str:
+    return path.relative_to(base_dir).with_suffix("").as_posix()
 
 
 def _rewrite_wechat_links_to_local(markdown_path: Path, local_links: dict[str, Path]) -> None:

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 from .archive import write_article_output
-from .assets import localize_markdown_assets
-from .defuddle import fetch_url_markdown, fetch_url_title
-from .naming import markdown_title
-from .preview import markdown_to_preview_html
-from .wechat import WechatExportError, export_wechat_knowledge_base
+from .defuddle import fetch_url_html, fetch_url_markdown, fetch_url_title
+from .html_markdown import extract_article_markdown
+from .metadata import ArticleMetadata, author_from_url, metadata_from_html, metadata_from_markdown, metadata_with_fallback
+from .naming import html_title, markdown_title
+from .wechat import WechatExportError, export_wechat_article, export_wechat_knowledge_base
 from .x_utils import XArticleError, extract_tweet_id, is_x_url
 from .xtomd import fetch_x_markdown
 
@@ -40,7 +41,7 @@ def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool
         help_text += " Alias for: content-capture x article."
     article = subparsers.add_parser("article", help=help_text)
     article.add_argument("tweet", help="X status URL or numeric tweet id.")
-    article.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
+    article.add_argument("--out", default="output", help="Output directory. Defaults to ./output.")
     article.add_argument(
         "--mirror-url",
         help="Get Markdown from a mirrored article URL but save it under the X tweet id filename.",
@@ -57,9 +58,11 @@ def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool
         help="Use absolute filesystem paths for localized assets. Useful for previewers that do not resolve relative links from the Markdown file.",
     )
     article.add_argument(
+        "--html",
         "--html-preview",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        dest="html_preview",
+        action="store_true",
+        default=False,
         help="Generate a sibling HTML preview file that can play local video assets.",
     )
     return article
@@ -72,14 +75,14 @@ def _add_web_parser(subparsers: argparse._SubParsersAction) -> argparse.Argument
 
 
 def _add_url_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    url = subparsers.add_parser("url", help="Get a URL. Alias for web URLs; X URLs are routed to X article mode.")
+    url = subparsers.add_parser("url", help="Get a URL. Alias for web URLs.")
     _add_url_arguments(url)
     return url
 
 
 def _add_url_arguments(url: argparse.ArgumentParser) -> None:
     url.add_argument("url", help="URL to get.")
-    url.add_argument("--out", default="out", help="Output directory. Defaults to ./out.")
+    url.add_argument("--out", default="output", help="Output directory. Defaults to ./output.")
     url.add_argument(
         "--local-assets",
         action=argparse.BooleanOptionalAction,
@@ -92,18 +95,28 @@ def _add_url_arguments(url: argparse.ArgumentParser) -> None:
         help="Use absolute filesystem paths for localized assets.",
     )
     url.add_argument(
+        "--html",
         "--html-preview",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        dest="html_preview",
+        action="store_true",
+        default=False,
         help="Generate a sibling HTML preview file.",
     )
 
 
 def _add_wechat_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    wechat = subparsers.add_parser("wechat", help="Export a WeChat article and linked WeChat articles as a knowledge base.")
+    wechat = subparsers.add_parser("wechat", help="Get a WeChat article. Use --deep for collection-style knowledge bases.")
     wechat.add_argument("url", help="WeChat article URL.")
-    wechat.add_argument("--out", default="out/wechat-kb", help="Output directory. Defaults to ./out/wechat-kb.")
-    wechat.add_argument("--max-links", type=int, default=0, help="Maximum linked WeChat articles to export. 0 means no limit.")
+    wechat.add_argument("--out", default="output", help="Output directory. Defaults to ./output.")
+    wechat.add_argument(
+        "--deep",
+        "--knowledge-base",
+        dest="deep",
+        action="store_true",
+        default=False,
+        help="Export linked WeChat articles as a collection-style knowledge base.",
+    )
+    wechat.add_argument("--max-links", type=int, default=0, help="Maximum linked WeChat articles to export in --deep mode. 0 means no limit.")
     wechat.add_argument(
         "--local-assets",
         action=argparse.BooleanOptionalAction,
@@ -116,8 +129,10 @@ def _add_wechat_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Use absolute filesystem paths for localized assets.",
     )
     wechat.add_argument(
+        "--html",
         "--html-preview",
-        action=argparse.BooleanOptionalAction,
+        dest="html_preview",
+        action="store_true",
         default=False,
         help="Generate sibling HTML preview files.",
     )
@@ -134,23 +149,34 @@ def run(args: argparse.Namespace) -> Path:
         if args.mirror_url:
             tweet_id = extract_tweet_id(args.tweet)
             markdown = fetch_url_markdown(args.mirror_url)
-            title = fetch_url_title(args.mirror_url) or markdown_title(markdown) or tweet_id
+            metadata = metadata_with_fallback(
+                metadata_from_markdown(markdown),
+                ArticleMetadata(title=fetch_url_title(args.mirror_url), author=author_from_url(args.tweet)),
+            )
+            title = metadata.title or markdown_title(markdown) or tweet_id
             return write_article_output(
                 markdown,
                 output_dir,
                 source_url=args.tweet,
                 title=title,
+                author=metadata.author,
+                published_at=metadata.published_at,
                 mirror_url=args.mirror_url,
                 local_assets=args.local_assets,
                 absolute_asset_paths=args.absolute_asset_paths,
                 html_preview=args.html_preview,
                 fallback_filename=tweet_id,
             )
-        markdown = fetch_x_markdown(args.tweet if not args.tweet.strip().isdigit() else f"https://x.com/i/status/{args.tweet.strip()}")
+        source_url = args.tweet if not args.tweet.strip().isdigit() else f"https://x.com/i/status/{args.tweet.strip()}"
+        markdown = _fetch_x_article_markdown(source_url)
+        metadata = metadata_with_fallback(metadata_from_markdown(markdown), ArticleMetadata(author=author_from_url(source_url)))
         return write_article_output(
             markdown,
             output_dir,
             source_url=args.tweet,
+            title=metadata.title,
+            author=metadata.author,
+            published_at=metadata.published_at,
             local_assets=args.local_assets,
             absolute_asset_paths=args.absolute_asset_paths,
             html_preview=args.html_preview,
@@ -158,32 +184,33 @@ def run(args: argparse.Namespace) -> Path:
         )
 
     if command in {"url", "web"}:
-        if is_x_url(args.url):
-            markdown = fetch_x_markdown(args.url)
-            return write_article_output(
-                markdown,
-                output_dir,
-                source_url=args.url,
-                local_assets=args.local_assets,
-                absolute_asset_paths=args.absolute_asset_paths,
-                html_preview=args.html_preview,
-                fallback_filename=extract_tweet_id(args.url),
-            )
-        markdown = fetch_url_markdown(args.url)
-        title = fetch_url_title(args.url)
+        markdown, metadata = _fetch_web_markdown_and_metadata(args.url)
         return write_article_output(
             markdown,
             output_dir,
             source_url=args.url,
-            title=title,
+            title=metadata.title,
+            author=metadata.author,
+            published_at=metadata.published_at,
             local_assets=args.local_assets,
             absolute_asset_paths=args.absolute_asset_paths,
             html_preview=args.html_preview,
+            fallback_filename=extract_tweet_id(args.url) if is_x_url(args.url) else "article",
         )
 
     if command == "wechat":
         if args.max_links < 0:
             raise XArticleError("--max-links must be at least 0.")
+        if args.max_links and not args.deep:
+            raise XArticleError("--max-links requires --deep.")
+        if not args.deep:
+            return export_wechat_article(
+                args.url,
+                output_dir,
+                local_assets=args.local_assets,
+                absolute_asset_paths=args.absolute_asset_paths,
+                html_preview=args.html_preview,
+            )
         result = export_wechat_knowledge_base(
             args.url,
             output_dir,
@@ -195,6 +222,30 @@ def run(args: argparse.Namespace) -> Path:
         return result.index_path
 
     raise XArticleError(f"Unsupported command: {command}")
+
+
+def _fetch_web_markdown_and_metadata(url: str) -> tuple[str, ArticleMetadata]:
+    try:
+        document = fetch_url_html(url)
+        markdown = extract_article_markdown(document, url)
+        metadata = metadata_from_html(document)
+        if not metadata.title:
+            metadata = metadata_with_fallback(metadata, ArticleMetadata(title=html_title(document)))
+        return markdown, metadata_with_fallback(metadata, ArticleMetadata(author=author_from_url(url)))
+    except (OSError, ValueError):
+        markdown = fetch_url_markdown(url)
+        metadata = metadata_with_fallback(
+            metadata_from_markdown(markdown),
+            ArticleMetadata(title=fetch_url_title(url), author=author_from_url(url)),
+        )
+        return markdown, metadata
+
+
+def _fetch_x_article_markdown(url: str) -> str:
+    try:
+        return fetch_url_markdown(url)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return fetch_x_markdown(url)
 
 
 def main(argv: list[str] | None = None) -> int:

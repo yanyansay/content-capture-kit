@@ -11,12 +11,13 @@ from content_capture.assets import absolutize_local_asset_links, localize_markdo
 from content_capture.defuddle import parse_url_to_markdown, slug_from_url
 from content_capture.cli import main
 from content_capture.longform import longform_from_tweet
+from content_capture.metadata import metadata_from_markdown
 from content_capture.preview import markdown_to_preview_html
 from content_capture.render import render_single_longform
 from content_capture.wechat import extract_wechat_article_links
 from content_capture.x_utils import extract_tweet_id, is_x_url
 from content_capture.html_markdown import extract_article_markdown
-from content_capture.xtomd import fetch_x_markdown_to_file
+from content_capture.xtomd import decode_markdown_response, fetch_x_markdown_to_file
 
 
 class ParsingTests(unittest.TestCase):
@@ -28,6 +29,21 @@ class ParsingTests(unittest.TestCase):
     def test_identifies_x_urls(self) -> None:
         self.assertTrue(is_x_url("https://x.com/jack/status/1"))
         self.assertFalse(is_x_url("https://example.com/a"))
+
+    def test_extracts_bold_markdown_metadata(self) -> None:
+        metadata = metadata_from_markdown(
+            "# Title\n\n"
+            "**Author**: 向阳乔木 ([@vista8](https://x.com/vista8))\n"
+            "**Date**: 2026-05-13\n"
+        )
+        self.assertEqual(metadata.title, "Title")
+        self.assertEqual(metadata.author, "向阳乔木")
+        self.assertEqual(metadata.published_at, "2026-05-13")
+
+    def test_decodes_x_markdown_with_replacement_for_invalid_utf8(self) -> None:
+        markdown = decode_markdown_response(b"# Title\n\nThunder\xed\xa0\xbc\n")
+        self.assertIn("# Title", markdown)
+        self.assertIn("Thunder", markdown)
 
 
 class LongformTests(unittest.TestCase):
@@ -98,12 +114,74 @@ class RenderAndDefuddleTests(unittest.TestCase):
                             temp_dir,
                         ]
                     )
-            path = Path(temp_dir) / "Mirror.md"
+            path = Path(temp_dir) / "alice" / "Mirror_unknown-date.md"
             self.assertEqual(status, 0)
             self.assertTrue(path.exists())
             content = path.read_text()
             self.assertIn("镜像: https://example.com/mirror", content)
             self.assertIn("```text", content)
+            self.assertFalse(path.with_suffix(".html").exists())
+
+    def test_x_article_prefers_defuddle_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch(
+                "content_capture.cli.fetch_url_markdown",
+                return_value="# Defuddle Title\n\n```js\nconsole.log('kept')\n```\n",
+            ) as fetch_url_markdown:
+                with patch("content_capture.cli.fetch_x_markdown") as fetch_x_markdown:
+                    status = main(
+                        [
+                            "x",
+                            "article",
+                            "https://x.com/alice/status/1234567890",
+                            "--out",
+                            temp_dir,
+                        ]
+                    )
+            path = Path(temp_dir) / "alice" / "Defuddle Title_unknown-date.md"
+            self.assertEqual(status, 0)
+            self.assertTrue(path.exists())
+            self.assertIn("```js\nconsole.log('kept')\n```", path.read_text())
+            fetch_url_markdown.assert_called_once_with("https://x.com/alice/status/1234567890")
+            fetch_x_markdown.assert_not_called()
+
+    def test_x_article_falls_back_to_xtomd_when_defuddle_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.cli.fetch_url_markdown", side_effect=OSError("defuddle unavailable")):
+                with patch("content_capture.cli.fetch_x_markdown", return_value="# X Title\n\nBody") as fetch_x_markdown:
+                    status = main(
+                        [
+                            "x",
+                            "article",
+                            "https://x.com/alice/status/1234567890",
+                            "--out",
+                            temp_dir,
+                        ]
+                    )
+            path = Path(temp_dir) / "alice" / "X Title_unknown-date.md"
+            self.assertEqual(status, 0)
+            self.assertTrue(path.exists())
+            fetch_x_markdown.assert_called_once_with("https://x.com/alice/status/1234567890")
+
+    def test_html_flag_generates_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            completed = subprocess.CompletedProcess(["defuddle"], 0, "# Mirror\n\nBody\n", "")
+            with patch("shutil.which", return_value="/usr/local/bin/defuddle"):
+                with patch("subprocess.run", return_value=completed):
+                    status = main(
+                        [
+                            "article",
+                            "https://x.com/alice/status/1234567890",
+                            "--mirror-url",
+                            "https://example.com/mirror",
+                            "--out",
+                            temp_dir,
+                            "--html",
+                        ]
+                    )
+            path = Path(temp_dir) / "alice" / "Mirror_unknown-date.md"
+            self.assertEqual(status, 0)
+            self.assertTrue(path.with_suffix(".html").exists())
 
     def test_extract_article_markdown_preserves_media_and_code(self) -> None:
         html = """
@@ -178,9 +256,40 @@ Line 2</code></pre></shiki-code>
         self.assertEqual([link.title for link in links], ["Child One", "Child Two"])
         self.assertEqual([link.section for link in links], ["需求", "需求"])
 
-    def test_wechat_command_exports_seed_children_and_index(self) -> None:
+    def test_wechat_command_exports_single_article_by_default(self) -> None:
+        article_html = """
+        <meta property="og:title" content="Seed">
+        <meta name="author" content="Seed Author">
+        <meta property="article:published_time" content="2026-05-13T08:00:00Z">
+        <div id="js_content">
+          <p>Seed body</p>
+          <h2>需求</h2>
+          <p><a href="https://mp.weixin.qq.com/s/child">Child Link</a></p>
+        </div>
+        """
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.wechat.fetch_url_html", return_value=article_html):
+                status = main(
+                    [
+                        "wechat",
+                        "https://mp.weixin.qq.com/s/root",
+                        "--out",
+                        temp_dir,
+                        "--no-local-assets",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            article_path = Path(temp_dir) / "SeedAuthor" / "Seed_2026-05-13.md"
+            self.assertTrue(article_path.exists())
+            self.assertFalse((Path(temp_dir) / "SeedAuthor" / "Seed" / "微信文章知识库.md").exists())
+            self.assertFalse((Path(temp_dir) / "SeedAuthor" / "Seed" / "需求" / "Child_unknown-date.md").exists())
+
+    def test_wechat_deep_command_exports_seed_children_and_index(self) -> None:
         seed_html = """
         <meta property="og:title" content="Seed">
+        <meta name="author" content="Seed Author">
+        <meta property="article:published_time" content="2026-05-13T08:00:00Z">
         <div id="js_content">
           <p>Seed body</p>
           <h2>需求</h2>
@@ -189,6 +298,8 @@ Line 2</code></pre></shiki-code>
         """
         child_html = """
         <meta property="og:title" content="Child">
+        <meta name="author" content="Seed Author">
+        <meta property="article:published_time" content="2026-05-14T08:00:00Z">
         <div id="js_content"><p>Child body</p></div>
         """
 
@@ -207,24 +318,26 @@ Line 2</code></pre></shiki-code>
                         "https://mp.weixin.qq.com/s/root",
                         "--out",
                         temp_dir,
+                        "--deep",
                         "--no-local-assets",
                     ]
                 )
             self.assertEqual(status, 0)
-            category = Path(temp_dir) / "Seed"
+            category = Path(temp_dir) / "SeedAuthor" / "Seed"
             self.assertTrue((category / "微信文章知识库.md").exists())
-            self.assertTrue((category / "Seed.md").exists())
-            self.assertTrue((category / "需求" / "Child.md").exists())
+            self.assertTrue((category / "Seed_2026-05-13.md").exists())
+            self.assertTrue((category / "需求" / "Child_2026-05-14.md").exists())
             index = (category / "微信文章知识库.md").read_text(encoding="utf-8")
-            self.assertIn("[[Seed]]", index)
-            self.assertIn("[[需求/Child|Child]]", index)
-            seed = (category / "Seed.md").read_text(encoding="utf-8")
-            self.assertIn("[Child Link](需求/Child.md)", seed)
+            self.assertIn("[[Seed_2026-05-13|Seed_2026-05-13]]", index)
+            self.assertIn("[[需求/Child_2026-05-14|Child_2026-05-14]]", index)
+            seed = (category / "Seed_2026-05-13.md").read_text(encoding="utf-8")
+            self.assertIn("[Child Link](需求/Child_2026-05-14.md)", seed)
             self.assertNotIn("mp.weixin.qq.com/s/child", seed)
 
     def test_wechat_command_removes_spaces_from_paths(self) -> None:
         seed_html = """
         <meta property="og:title" content="Seed Title">
+        <meta name="author" content="Seed Author">
         <div id="js_content">
           <p>Seed body</p>
           <h2>Data Analysis</h2>
@@ -233,6 +346,7 @@ Line 2</code></pre></shiki-code>
         """
         child_html = """
         <meta property="og:title" content="Child Title">
+        <meta name="author" content="Seed Author">
         <div id="js_content"><p>Child body</p></div>
         """
 
@@ -244,14 +358,29 @@ Line 2</code></pre></shiki-code>
                         "https://mp.weixin.qq.com/s/root",
                         "--out",
                         temp_dir,
+                        "--deep",
                         "--no-local-assets",
                     ]
                 )
             self.assertEqual(status, 0)
             paths = [path.relative_to(temp_dir).as_posix() for path in Path(temp_dir).rglob("*.md")]
-            self.assertIn("SeedTitle/SeedTitle.md", paths)
-            self.assertIn("SeedTitle/DataAnalysis/ChildTitle.md", paths)
+            self.assertIn("SeedAuthor/SeedTitle/SeedTitle_unknown-date.md", paths)
+            self.assertIn("SeedAuthor/SeedTitle/DataAnalysis/ChildTitle_unknown-date.md", paths)
             self.assertFalse(any(" " in path for path in paths))
+
+    def test_wechat_max_links_requires_deep(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            status = main(
+                [
+                    "wechat",
+                    "https://mp.weixin.qq.com/s/root",
+                    "--out",
+                    temp_dir,
+                    "--max-links",
+                    "1",
+                ]
+            )
+        self.assertEqual(status, 1)
 
     def test_localize_markdown_assets_downloads_and_rewrites_links(self) -> None:
         class FakeHeaders(dict):
