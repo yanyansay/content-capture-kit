@@ -75,6 +75,35 @@ def _extract_note_tweet(tweet: dict[str, Any]) -> str | None:
     return None
 
 
+def normalize_metrics(tweet: dict[str, Any]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    source = tweet.get("public_metrics")
+    if isinstance(source, dict):
+        metrics.update(source)
+
+    aliases = {
+        "favorite_count": "like_count",
+        "favourites_count": "like_count",
+        "retweet_count": "retweet_count",
+        "reply_count": "reply_count",
+        "quote_count": "quote_count",
+        "bookmark_count": "bookmark_count",
+        "view_count": "impression_count",
+        "views": "impression_count",
+        "impression_count": "impression_count",
+    }
+    for source_key, target_key in aliases.items():
+        if source_key in tweet and target_key not in metrics and not isinstance(tweet[source_key], dict):
+            metrics[target_key] = tweet[source_key]
+
+    views = tweet.get("views")
+    if isinstance(views, dict) and "impression_count" not in metrics:
+        count = views.get("count") or views.get("view_count")
+        if count is not None:
+            metrics["impression_count"] = count
+    return metrics
+
+
 def longform_from_tweet(
     tweet: dict[str, Any],
     author: dict[str, Any] | None = None,
@@ -110,5 +139,5 @@ def longform_from_tweet(
         created_at=tweet.get("created_at"),
         author_name=author.get("name") if isinstance(author, dict) else None,
         author_username=username,
-        metrics=tweet.get("public_metrics") if isinstance(tweet.get("public_metrics"), dict) else {},
+        metrics=normalize_metrics(tweet),
     )

@@ -16,6 +16,15 @@ from content_capture.preview import markdown_to_preview_html
 from content_capture.render import render_single_longform
 from content_capture.wechat import extract_wechat_article_links
 from content_capture.x_utils import extract_tweet_id, is_x_url
+from content_capture.x_web import (
+    XUserFilters,
+    discover_graphql_query_ids,
+    normalize_handle,
+    parse_count_value,
+    parse_timeline_page,
+    post_matches_filters,
+    export_x_user_articles,
+)
 from content_capture.html_markdown import extract_article_markdown
 from content_capture.xtomd import decode_markdown_response, fetch_x_markdown_to_file
 
@@ -45,6 +54,16 @@ class ParsingTests(unittest.TestCase):
         self.assertIn("# Title", markdown)
         self.assertIn("Thunder", markdown)
 
+    def test_normalizes_x_handles(self) -> None:
+        self.assertEqual(normalize_handle("@LunaAI519"), "LunaAI519")
+        self.assertEqual(normalize_handle("https://x.com/LunaAI519?lang=en"), "LunaAI519")
+        self.assertEqual(normalize_handle("https://twitter.com/LunaAI519"), "LunaAI519")
+
+    def test_parses_filter_count_values(self) -> None:
+        self.assertEqual(parse_count_value("10000"), 10000)
+        self.assertEqual(parse_count_value("10k"), 10000)
+        self.assertEqual(parse_count_value("1w"), 10000)
+
 
 class LongformTests(unittest.TestCase):
     def test_article_wins_over_note_tweet(self) -> None:
@@ -73,6 +92,161 @@ class LongformTests(unittest.TestCase):
 
     def test_short_tweet_is_skipped(self) -> None:
         self.assertIsNone(longform_from_tweet({"id": "3", "text": "short"}))
+
+
+class XWebTests(unittest.TestCase):
+    def test_discovers_graphql_query_ids_from_sources(self) -> None:
+        ids = discover_graphql_query_ids(
+            "",
+            [
+                'fetch("/i/api/graphql/abcDEF12345/UserArticlesTweets?variables=")',
+                'operationName:"UserByScreenName",operationType:"query",metadata:{},queryId:"xyz987654321"',
+            ],
+        )
+        self.assertEqual(ids["UserArticlesTweets"], "abcDEF12345")
+        self.assertEqual(ids["UserByScreenName"], "xyz987654321")
+
+    def test_timeline_page_extracts_longform_posts_metrics_and_cursor(self) -> None:
+        payload = {
+            "data": {
+                "user": {
+                    "result": {
+                        "timeline_v2": {
+                            "timeline": {
+                                "instructions": [
+                                    {
+                                        "type": "TimelineAddEntries",
+                                        "entries": [
+                                            {
+                                                "entryId": "tweet-1",
+                                                "content": {
+                                                    "itemContent": {
+                                                        "tweet_results": {
+                                                            "result": {
+                                                                "rest_id": "1",
+                                                                "legacy": {
+                                                                    "created_at": "2026-05-12T00:00:00Z",
+                                                                    "full_text": "short",
+                                                                    "favorite_count": 7,
+                                                                    "retweet_count": 3,
+                                                                    "reply_count": 2,
+                                                                },
+                                                                "views": {"count": "12000"},
+                                                                "note_tweet": {
+                                                                    "note_tweet_results": {
+                                                                        "result": {"text": "Long note body"}
+                                                                    }
+                                                                },
+                                                                "core": {
+                                                                    "user_results": {
+                                                                        "result": {
+                                                                            "legacy": {
+                                                                                "screen_name": "alice",
+                                                                                "name": "Alice",
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            },
+                                            {
+                                                "entryId": "tweet-2",
+                                                "content": {
+                                                    "itemContent": {
+                                                        "tweet_results": {
+                                                            "result": {
+                                                                "rest_id": "2",
+                                                                "legacy": {"full_text": "short only"},
+                                                                "views": {"count": "22000"},
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            },
+                                            {"entryId": "cursor-bottom-1", "content": {"cursorType": "Bottom", "value": "CURSOR"}},
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        page = parse_timeline_page(payload)
+        self.assertEqual(page.cursor, "CURSOR")
+        self.assertEqual(len(page.posts), 1)
+        self.assertEqual(page.posts[0].tweet_id, "1")
+        self.assertEqual(page.posts[0].metrics["impression_count"], "12000")
+        self.assertTrue(post_matches_filters(page.posts[0], XUserFilters(min_views=10000)))
+        self.assertFalse(post_matches_filters(page.posts[0], XUserFilters(min_views=20000)))
+
+    def test_timeline_page_renders_article_media_from_content_state(self) -> None:
+        payload = {
+            "data": {
+                "user": {
+                    "result": {
+                        "timeline_v2": {
+                            "timeline": {
+                                "instructions": [
+                                    {
+                                        "entries": [
+                                            {
+                                                "entryId": "tweet-1",
+                                                "content": {
+                                                    "itemContent": {
+                                                        "tweet_results": {
+                                                            "result": {
+                                                                "rest_id": "1",
+                                                                "legacy": {"created_at": "Wed May 13 02:58:09 +0000 2026"},
+                                                                "views": {"count": "10000"},
+                                                                "article": {
+                                                                    "article_results": {
+                                                                        "result": {
+                                                                            "title": "Article title",
+                                                                            "content_state": {
+                                                                                "blocks": [{"text": "Article body"}],
+                                                                                "entityMap": {
+                                                                                    "0": {
+                                                                                        "data": {
+                                                                                            "media_url_https": "https://pbs.twimg.com/media/demo.jpg"
+                                                                                        }
+                                                                                    }
+                                                                                },
+                                                                            },
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        page = parse_timeline_page(payload, fallback_author={"username": "alice"})
+        self.assertEqual(len(page.posts), 1)
+        self.assertIn("Article body", page.posts[0].text)
+        self.assertIn("![image](https://pbs.twimg.com/media/demo.jpg)", page.posts[0].text)
+
+    def test_min_views_filter_skips_posts_without_view_count(self) -> None:
+        post = longform_from_tweet(
+            {"id": "3", "created_at": "2026-05-12T00:00:00Z", "note_tweet": {"text": "Long note body"}},
+            {"username": "alice"},
+        )
+        assert post is not None
+        self.assertFalse(post_matches_filters(post, XUserFilters(min_views=1)))
+        self.assertTrue(post_matches_filters(post, XUserFilters()))
 
 
 class RenderAndDefuddleTests(unittest.TestCase):
@@ -162,6 +336,106 @@ class RenderAndDefuddleTests(unittest.TestCase):
             self.assertEqual(status, 0)
             self.assertTrue(path.exists())
             fetch_x_markdown.assert_called_once_with("https://x.com/alice/status/1234567890")
+
+    def test_x_user_command_exports_matching_articles_and_index(self) -> None:
+        def fake_export(user, output_dir, filters, **kwargs):
+            from content_capture.x_web import XUserExportResult
+
+            self.assertEqual(user, "@alice")
+            self.assertEqual(filters.min_views, 10000)
+            author_dir = Path(output_dir) / "alice"
+            static_dir = author_dir / "static"
+            static_dir.mkdir(parents=True)
+            article_path = static_dir / "Long_2026-05-12.md"
+            index_path = author_dir / "index.md"
+            article_path.write_text("# Long\n\nBody\n", encoding="utf-8")
+            index_path.write_text("# X 用户文章索引 - alice\n", encoding="utf-8")
+            return XUserExportResult(index_path=index_path, article_paths=[article_path])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.cli.export_x_user_articles", side_effect=fake_export) as export:
+                status = main(["x", "user", "@alice", "--min-views", "1w", "--out", temp_dir])
+            self.assertEqual(status, 0)
+            self.assertTrue((Path(temp_dir) / "alice" / "index.md").exists())
+            self.assertTrue((Path(temp_dir) / "alice" / "static" / "Long_2026-05-12.md").exists())
+            self.assertEqual(export.call_count, 1)
+
+    def test_x_user_export_writes_static_articles_and_compact_index(self) -> None:
+        payload = {
+            "data": {
+                "user": {
+                    "result": {
+                        "timeline_v2": {
+                            "timeline": {
+                                "instructions": [
+                                    {
+                                        "entries": [
+                                            {
+                                                "entryId": "tweet-1",
+                                                "content": {
+                                                    "itemContent": {
+                                                        "tweet_results": {
+                                                            "result": {
+                                                                "rest_id": "1",
+                                                                "legacy": {
+                                                                    "created_at": "Wed May 13 02:58:09 +0000 2026",
+                                                                    "favorite_count": 7,
+                                                                    "retweet_count": 3,
+                                                                    "reply_count": 2,
+                                                                },
+                                                                "views": {"count": "10000"},
+                                                                "article": {"title": "Long", "text": "Body"},
+                                                                "core": {
+                                                                    "user_results": {
+                                                                        "result": {
+                                                                            "legacy": {"screen_name": "alice", "name": "Alice"}
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        class FakeClient:
+            def create_session(self, handle, cookie_header=None):
+                return object()
+
+            def fetch_user_by_screen_name(self, session, handle):
+                return {"data": {"user": {"result": {"rest_id": "42", "legacy": {"screen_name": handle}}}}}
+
+            def fetch_user_articles_tweets(self, session, user_id, cursor):
+                return payload
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.x_web.XWebClient", return_value=FakeClient()):
+                result = export_x_user_articles("@alice", Path(temp_dir), XUserFilters(min_views=10000))
+            author_dir = Path(temp_dir) / "alice"
+            self.assertTrue(result.index_path.exists())
+            self.assertFalse((author_dir / "image").exists())
+            self.assertFalse((author_dir / "video").exists())
+            self.assertEqual(len(list((author_dir / "static").glob("*.md"))), 1)
+            index = result.index_path.read_text(encoding="utf-8")
+            self.assertIn("[Long](<static/", index)
+            self.assertIn("2026-05-13 02:58", index)
+            self.assertIn("[10k](https://x.com/alice/status/1)", index)
+            self.assertNotIn("来源", index)
+
+    def test_x_user_command_reports_web_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.cli.export_x_user_articles", side_effect=ValueError("bad web payload")):
+                status = main(["x", "user", "@alice", "--out", temp_dir])
+            self.assertEqual(status, 1)
 
     def test_html_flag_generates_preview(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

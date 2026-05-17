@@ -22,6 +22,8 @@ def write_article_output(
     html_preview: bool = False,
     fallback_filename: str = "article",
     group_by_author: bool = True,
+    image_dir: Path | None = None,
+    video_dir: Path | None = None,
 ) -> Path:
     resolved_title = title or markdown_title(markdown) or fallback_filename
     author_name = safe_filename(author or "unknown-author", fallback="unknown-author")
@@ -39,8 +41,9 @@ def write_article_output(
         localize_markdown_assets(
             output_path,
             absolute_paths=absolute_asset_paths,
-            image_dir=article_dir / "image",
-            video_dir=article_dir / "video",
+            image_dir=image_dir or article_dir / "image",
+            video_dir=video_dir or article_dir / "video",
+            source_url=source_url,
         )
     if html_preview:
         markdown_to_preview_html(output_path)
