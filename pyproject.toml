@@ -1,9 +1,12 @@
 [project]
 name = "content-capture-kit"
-version = "0.1.6"
+version = "0.1.7"
 description = "Get content from X, WeChat, and web pages as Markdown for knowledge bases."
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "twitter-cli>=0.8.6",
+]
 
 [project.scripts]
 content-capture = "content_capture.cli:main"

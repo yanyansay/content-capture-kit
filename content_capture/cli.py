@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -10,9 +9,9 @@ from .defuddle import fetch_url_html, fetch_url_markdown, fetch_url_title
 from .html_markdown import extract_article_markdown
 from .metadata import ArticleMetadata, author_from_url, metadata_from_html, metadata_from_markdown, metadata_with_fallback
 from .naming import html_title, markdown_title
+from .twitter_cli_fallback import fetch_x_markdown_with_twitter_cli
 from .wechat import WechatExportError, export_wechat_article, export_wechat_knowledge_base
 from .x_utils import XArticleError, extract_tweet_id, is_x_url
-from .x_web import XUserFilters, export_x_user_articles, parse_count_value, parse_date_value
 from .xtomd import fetch_x_markdown
 
 
@@ -26,7 +25,6 @@ def build_parser() -> argparse.ArgumentParser:
     x = subparsers.add_parser("x", help="Get X/Twitter articles.")
     x_subparsers = x.add_subparsers(dest="x_command", required=True)
     _add_article_parser(x_subparsers, aliases=False)
-    _add_user_parser(x_subparsers)
 
     _add_wechat_parser(subparsers)
     _add_web_parser(subparsers)
@@ -68,21 +66,6 @@ def _add_article_parser(subparsers: argparse._SubParsersAction, *, aliases: bool
         help="Generate a sibling HTML preview file that can play local video assets.",
     )
     return article
-
-
-def _add_user_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    user = subparsers.add_parser("user", help="Get longform posts from one X user with filters.")
-    user.add_argument("user", help="X handle, @handle, or profile URL.")
-    user.add_argument("--out", default="output", help="Output directory. Defaults to ./output.")
-    user.add_argument("--min-views", type=parse_count_value, help="Minimum views, e.g. 10000, 10k, or 1w.")
-    user.add_argument("--min-likes", type=parse_count_value, help="Minimum likes, e.g. 1000 or 1k.")
-    user.add_argument("--min-retweets", type=parse_count_value, help="Minimum retweets, e.g. 100 or 1k.")
-    user.add_argument("--since", type=parse_date_value, help="Only include posts on or after YYYY-MM-DD.")
-    user.add_argument("--until", type=parse_date_value, help="Only include posts on or before YYYY-MM-DD.")
-    user.add_argument("--max-pages", type=int, default=20, help="Maximum timeline pages to scan. Defaults to 20.")
-    user.add_argument("--limit", type=int, default=0, help="Maximum matching articles to save. 0 means no limit.")
-    user.add_argument("--cookie-file", help="Read an X logged-in Cookie header from this local file.")
-    return user
 
 
 def _add_web_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -200,26 +183,6 @@ def run(args: argparse.Namespace) -> Path:
             fallback_filename=extract_tweet_id(args.tweet),
         )
 
-    if command == "user":
-        if args.since and args.until and args.since > args.until:
-            raise XArticleError("--since must be on or before --until.")
-        result = export_x_user_articles(
-            args.user,
-            output_dir,
-            filters=XUserFilters(
-                min_views=args.min_views,
-                min_likes=args.min_likes,
-                min_retweets=args.min_retweets,
-                since=args.since,
-                until=args.until,
-                limit=args.limit,
-            ),
-            max_pages=args.max_pages,
-            article_markdown_fetcher=_fetch_x_article_markdown,
-            cookie_header=_read_cookie_file(args.cookie_file) if args.cookie_file else None,
-        )
-        return result.index_path
-
     if command in {"url", "web"}:
         markdown, metadata = _fetch_web_markdown_and_metadata(args.url)
         return write_article_output(
@@ -261,15 +224,6 @@ def run(args: argparse.Namespace) -> Path:
     raise XArticleError(f"Unsupported command: {command}")
 
 
-def _read_cookie_file(path: str) -> str:
-    cookie = Path(path).expanduser().read_text().strip()
-    if not cookie:
-        raise XArticleError("--cookie-file is empty.")
-    if "auth_token=" not in cookie or "ct0=" not in cookie:
-        raise XArticleError("--cookie-file must contain at least auth_token and ct0 cookies.")
-    return cookie
-
-
 def _fetch_web_markdown_and_metadata(url: str) -> tuple[str, ArticleMetadata]:
     try:
         document = fetch_url_html(url)
@@ -288,10 +242,15 @@ def _fetch_web_markdown_and_metadata(url: str) -> tuple[str, ArticleMetadata]:
 
 
 def _fetch_x_article_markdown(url: str) -> str:
+    fallback_errors: list[str] = []
     try:
-        return fetch_url_markdown(url)
-    except (OSError, ValueError, subprocess.SubprocessError):
+        return fetch_x_markdown_with_twitter_cli(url)
+    except XArticleError as error:
+        fallback_errors.append(str(error))
+    try:
         return fetch_x_markdown(url)
+    except XArticleError as error:
+        raise XArticleError(f"{error}; twitter-cli failed first: {fallback_errors[0]}") from error
 
 
 def main(argv: list[str] | None = None) -> int:
