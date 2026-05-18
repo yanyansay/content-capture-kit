@@ -2,16 +2,18 @@
 
 [中文](README.md) | English
 
-`content-capture-kit` exports X/Twitter longform posts, WeChat Official Account articles, and normal web articles into Markdown files suitable for an Obsidian knowledge base.
+`content-capture-kit` exports X/Twitter content, WeChat Official Account articles, and normal web articles into Markdown files suitable for an Obsidian knowledge base.
 
 The goal is not just page backup. The goal is to create readable, linkable, and maintainable local notes.
 
 ## Features
 
 - Get a single X longform post as Markdown.
+- After login, get X user posts with filters such as view count and original-only.
 - Export normal web pages with Defuddle fallback.
 - Export a single WeChat Official Account article.
 - Export a WeChat collection article and organize linked articles by the section headings in the entry article.
+- After login, get WeChat Official Account article lists and save filtered full articles.
 - Download images into a local `image/` directory for single-article and normal web exports.
 - Skip WeChat videos by default.
 - Download X single-article videos into a local `video/` directory when possible.
@@ -21,8 +23,8 @@ The goal is not just page backup. The goal is to create readable, linkable, and 
 
 | Platform | Status | Current Support | Command | Notes |
 | --- | --- | --- | --- | --- |
-| X/Twitter | Done | Single longform article retrieval; local images and best-effort local videos | `content-capture x article` | X single articles use `twitter-cli` directly, then fall back to the public conversion path when needed. |
-| WeChat Official Account | Done | Single articles, collection articles, child article grouping, local images | `content-capture wechat` | WeChat videos are not downloaded. Verification pages require retrying later. |
+| X/Twitter | Done | Single longform article retrieval; login-required user batch export with view-count and original-only filters | `content-capture x article`, `content-capture x user` | X single articles use `twitter-cli` directly; user batch discovery reuses feedgrab sessions and X web interfaces. |
+| WeChat Official Account | Done | Single articles, collection articles, account batch export, child article grouping, local images | `content-capture wechat`, `content-capture wechat account` | Account batch export requires login. WeChat videos are not downloaded. Verification pages require retrying later. |
 | Normal web pages | Done | Article Markdown extraction, local images, Defuddle fallback | `content-capture web` | Best for static article pages. Dynamic pages depend on page structure. |
 | Xiaohongshu | Not done | Not supported yet | None | Planned for image/video resource retrieval. |
 | Douyin | Not done | Not supported yet | None | Planned for video resource retrieval. |
@@ -48,7 +50,7 @@ npm install -g content-capture-kit
 content-capture --help
 ```
 
-Environment requirements: Node.js 18 or newer, plus Python 3.11 or newer on your machine. The npm package includes the Python source and runs it through your local Python; it does not install Python for you. X single-article retrieval depends on the Python package `twitter-cli`. The Defuddle fallback for normal web pages still requires `defuddle` to be installed locally.
+Environment requirements: Node.js 18 or newer, plus Python 3.11 or newer on your machine. The npm package includes the Python source and runs it through your local Python; it does not install Python for you. X single-article retrieval depends on the Python package `twitter-cli`. X and WeChat batch export depend on `feedgrab` sessions and browser support. The Defuddle fallback for normal web pages still requires `defuddle` to be installed locally.
 
 ### Homebrew
 
@@ -79,6 +81,13 @@ defuddle parse https://example.com/article --md
 
 X single-article retrieval uses `twitter-cli`'s `twitter article` command first. If `twitter-cli` authentication or the X interface fails, the tool falls back to the public conversion path.
 
+Batch export requires login first:
+
+```bash
+content-capture login x
+content-capture login wechat
+```
+
 ## Start Here
 
 If you only want to save one piece of content into Obsidian, choose the platform command and set an output directory:
@@ -86,8 +95,10 @@ If you only want to save one piece of content into Obsidian, choose the platform
 | Content | Command |
 | --- | --- |
 | X longform article | `content-capture x article <x-url-or-id> --out <output-dir>` |
+| High-view X user content | `content-capture x user <handle> --min-views 10w --original-only --out <output-dir>` |
 | Single WeChat article | `content-capture wechat <mp.weixin-url> --out <output-dir>` |
 | WeChat collection knowledge base | `content-capture wechat <mp.weixin-url> --deep --out <output-dir>` |
+| High-read WeChat account articles | `content-capture wechat account <account-name> --min-reads 10w --out <output-dir>` |
 | Normal web article | `content-capture web <url> --out <output-dir>` |
 
 For a first run, point `--out` to a temporary directory such as `output/test`. After checking the Markdown, media links, and folder structure, point `--out` to the final folder inside your Obsidian vault.
@@ -99,7 +110,8 @@ For a first run, point `--out` to a temporary directory such as `output/test`. A
 - `content-capture wechat` gets one article by default. Use `--deep` or `--knowledge-base` only when the entry article should be treated as a collection-style knowledge base.
 - The normal web page Defuddle fallback requires `defuddle` to be installed locally.
 - X single-article retrieval uses `twitter-cli` first, reusing its X web interface, authentication, and Markdown conversion. It falls back to the public conversion path when needed.
-- X/Twitter currently supports single article retrieval only. User profiles and filtered batch retrieval are not supported.
+- X/Twitter batch export requires `content-capture login x` first. List discovery and view-count filters depend on the fields returned by X web interfaces.
+- WeChat account batch export requires `content-capture login wechat` first. If a list item has no read count, it does not match `--min-reads` by default; use `--include-unknown-metrics` to keep those items.
 - WeChat videos are not downloaded. The current output focuses on text, images, and article structure.
 - Asset links are relative by default for Obsidian vault portability. Use `--absolute-asset-paths` only when your previewer cannot resolve relative paths.
 
@@ -140,7 +152,21 @@ Notes:
 - If that fails, it calls `defuddle parse <url> --md`.
 - Images are localized into the `image/` directory.
 
-### 3. Get a Single WeChat Article
+### 3. Get X User Content With Filters
+
+```bash
+content-capture login x
+content-capture x user example_author --min-views 10w --original-only --out output/x
+```
+
+Notes:
+
+- The tool first discovers the user's list of posts from the saved login session, then filters by view count.
+- `--original-only` skips retweets. `--no-replies` also skips replies.
+- Matched items are hydrated one by one. The tool tries `twitter-cli` first, then falls back to the existing public path or list text.
+- The output folder includes `manifest.json` and `index.md` for review and retries.
+
+### 4. Get a Single WeChat Article
 
 ```bash
 content-capture wechat 'https://mp.weixin.qq.com/s/example_article_id' --out output
@@ -156,7 +182,21 @@ Notes:
 - `微信文章知识库.md` is not generated by default.
 - If WeChat returns a verification page, the tool reports a clear error.
 
-### 4. Get a WeChat Collection as a Knowledge Base
+### 5. Get WeChat Account Articles
+
+```bash
+content-capture login wechat
+content-capture wechat account "Example Account" --min-reads 10w --since 2025-01-01 --out output/wechat
+```
+
+Notes:
+
+- Account mode first discovers article list data through the saved login session, then filters by read count and date.
+- If a list item has no read count, it does not match `--min-reads` by default. Add `--include-unknown-metrics` to keep those articles.
+- Matched articles are fetched as full Markdown.
+- The output folder includes `manifest.json` and `index.md`.
+
+### 6. Get a WeChat Collection as a Knowledge Base
 
 Use this when an entry article contains many linked WeChat articles.
 

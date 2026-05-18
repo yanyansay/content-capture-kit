@@ -124,6 +124,12 @@ def normalize_wechat_article_url(url: str) -> str | None:
     if not is_wechat_article_url(url):
         return None
     parsed = parsed._replace(fragment="")
+    if parsed.path.startswith("/s/") or parsed.path == "/s":
+        parsed = parsed._replace(query="")
+    elif parsed.path.startswith("/mp/appmsg/show"):
+        allowed = {"__biz", "mid", "idx", "sn"}
+        query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        parsed = parsed._replace(query=urllib.parse.urlencode([(key, value) for key, value in query if key in allowed]))
     return urllib.parse.urlunparse(parsed)
 
 

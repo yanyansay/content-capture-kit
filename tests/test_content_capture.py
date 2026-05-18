@@ -11,9 +11,11 @@ from content_capture.assets import absolutize_local_asset_links, localize_markdo
 from content_capture.defuddle import parse_url_to_markdown, slug_from_url
 from content_capture.cli import main
 from content_capture.metadata import metadata_from_markdown
+from content_capture.metrics import parse_count
 from content_capture.preview import markdown_to_preview_html
 from content_capture.twitter_cli_fallback import fetch_x_markdown_with_twitter_cli
-from content_capture.wechat import extract_wechat_article_links
+from content_capture.wechat import extract_wechat_article_links, normalize_wechat_article_url
+from content_capture.x_batch import export_x_user
 from content_capture.x_utils import XArticleError
 from content_capture.x_utils import extract_tweet_id, is_x_url
 from content_capture.html_markdown import extract_article_markdown
@@ -44,6 +46,12 @@ class ParsingTests(unittest.TestCase):
         markdown = decode_markdown_response(b"# Title\n\nThunder\xed\xa0\xbc\n")
         self.assertIn("# Title", markdown)
         self.assertIn("Thunder", markdown)
+
+    def test_parse_count_supports_common_suffixes(self) -> None:
+        self.assertEqual(parse_count("10w"), 100000)
+        self.assertEqual(parse_count("12.5万"), 125000)
+        self.assertEqual(parse_count("100k"), 100000)
+        self.assertEqual(parse_count("1.2m views"), 1200000)
 
 
 class RenderAndDefuddleTests(unittest.TestCase):
@@ -142,9 +150,28 @@ class RenderAndDefuddleTests(unittest.TestCase):
 
     def test_x_user_command_is_not_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(SystemExit) as error:
-                main(["x", "user", "@alice", "--out", temp_dir])
-        self.assertEqual(error.exception.code, 2)
+            with patch("content_capture.cli.export_x_user") as export:
+                export.return_value.index_path = Path(temp_dir) / "alice" / "index.md"
+                status = main(["x", "user", "@alice", "--out", temp_dir, "--min-views", "10w"])
+        self.assertEqual(status, 0)
+        export.assert_called_once()
+
+    def test_x_user_export_filters_by_views_then_writes_index(self) -> None:
+        tweets = [
+            {"id": "1", "author": "alice", "text": "Big", "views": "12w", "created_at": "2026-05-01"},
+            {"id": "2", "author": "alice", "text": "Small", "views": "5w", "created_at": "2026-05-01"},
+            {"id": "3", "author": "alice", "text": "Unknown", "views": "", "created_at": "2026-05-01"},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.x_batch.discover_x_user_tweets", return_value=tweets):
+                with patch("content_capture.x_batch.fetch_x_markdown_with_twitter_cli", return_value="# Big\n\nBody"):
+                    result = export_x_user("alice", Path(temp_dir), min_views="10w", local_assets=False)
+            self.assertEqual(result.discovered, 3)
+            self.assertEqual(result.matched, 1)
+            self.assertEqual(result.saved, 1)
+            self.assertEqual(result.unknown_metrics, 1)
+            self.assertTrue((Path(temp_dir) / "alice" / "index.md").exists())
+            self.assertTrue((Path(temp_dir) / "alice" / "manifest.json").exists())
 
     def test_html_flag_generates_preview(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -223,6 +250,19 @@ Line 2</code></pre></shiki-code>
         markdown = extract_article_markdown(html, "https://mp.weixin.qq.com/s/demo")
         self.assertIn("[the article](https://example.com/a)", markdown)
 
+    def test_extract_article_markdown_handles_wechat_lazy_images_and_code_breaks(self) -> None:
+        html = """
+        <div id="js_content">
+          <p><img data-src="https://mmbiz.qpic.cn/demo.png" data-w="640" alt="Demo"></p>
+          <pre><code>line 1<br>line 2</code></pre>
+          <span class="code-snippet__line-index">1</span>
+        </div>
+        """
+        markdown = extract_article_markdown(html, "https://mp.weixin.qq.com/s/demo")
+        self.assertIn("![Demo](https://mmbiz.qpic.cn/demo.png)", markdown)
+        self.assertIn("```text\nline 1\nline 2\n```", markdown)
+        self.assertNotIn("code-snippet__line-index", markdown)
+
     def test_extract_wechat_article_links_from_article_body(self) -> None:
         html = """
         <a href="https://mp.weixin.qq.com/s/outside">outside</a>
@@ -235,9 +275,19 @@ Line 2</code></pre></shiki-code>
         </div>
         """
         links = extract_wechat_article_links(html, "https://mp.weixin.qq.com/s/root")
-        self.assertEqual([link.url for link in links], ["https://mp.weixin.qq.com/s/child1?scene=1", "https://mp.weixin.qq.com/s/child2"])
+        self.assertEqual([link.url for link in links], ["https://mp.weixin.qq.com/s/child1", "https://mp.weixin.qq.com/s/child2"])
         self.assertEqual([link.title for link in links], ["Child One", "Child Two"])
         self.assertEqual([link.section for link in links], ["需求", "需求"])
+
+    def test_wechat_url_normalization_strips_tracking_parameters(self) -> None:
+        self.assertEqual(
+            normalize_wechat_article_url("https://mp.weixin.qq.com/s/demo?scene=1&click_id=abc#rd"),
+            "https://mp.weixin.qq.com/s/demo",
+        )
+        self.assertEqual(
+            normalize_wechat_article_url("https://mp.weixin.qq.com/mp/appmsg/show?__biz=b&mid=1&idx=2&sn=s&scene=1"),
+            "https://mp.weixin.qq.com/mp/appmsg/show?__biz=b&mid=1&idx=2&sn=s",
+        )
 
     def test_wechat_command_exports_single_article_by_default(self) -> None:
         article_html = """
@@ -364,6 +414,39 @@ Line 2</code></pre></shiki-code>
                 ]
             )
         self.assertEqual(status, 1)
+
+    def test_wechat_account_command_filters_and_exports(self) -> None:
+        articles = [
+            {"title": "Hot", "link": "https://mp.weixin.qq.com/s/hot", "read_num": "10w"},
+            {"title": "Cold", "link": "https://mp.weixin.qq.com/s/cold", "read_num": "1w"},
+            {"title": "Unknown", "link": "https://mp.weixin.qq.com/s/unknown"},
+        ]
+        html = """
+        <meta property="og:title" content="Hot">
+        <meta name="author" content="Account">
+        <div id="js_content"><p>Hot body</p></div>
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("content_capture.wechat_account.discover_wechat_account_articles", return_value=articles):
+                with patch("content_capture.wechat.fetch_url_html", return_value=html):
+                    status = main(
+                        [
+                            "wechat",
+                            "account",
+                            "Account",
+                            "--min-reads",
+                            "10w",
+                            "--out",
+                            temp_dir,
+                            "--no-local-assets",
+                        ]
+                    )
+            root = Path(temp_dir) / "Account"
+            self.assertEqual(status, 0)
+            self.assertTrue((root / "index.md").exists())
+            self.assertTrue((root / "manifest.json").exists())
+            self.assertTrue((root / "Account" / "Hot_unknown-date.md").exists())
+            self.assertFalse((root / "Account" / "Cold_unknown-date.md").exists())
 
     def test_localize_markdown_assets_downloads_and_rewrites_links(self) -> None:
         class FakeHeaders(dict):

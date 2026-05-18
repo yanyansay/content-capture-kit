@@ -38,10 +38,15 @@ class ArticleMarkdownParser(HTMLParser):
         if tag not in VOID_TAGS:
             self.depth += 1
 
-        if tag in {"script", "style", "svg"}:
+        classes = set(attrs_dict.get("class", "").split())
+        if tag in {"script", "style", "svg"} or "code-snippet__line-index" in classes:
             self.skip_depth += 1
             return
         if self.skip_depth:
+            return
+
+        if self.in_pre and tag == "br":
+            self.pre_parts.append("\n")
             return
 
         if re.fullmatch(r"h[1-6]", tag):
@@ -65,8 +70,11 @@ class ArticleMarkdownParser(HTMLParser):
             self.in_pre = True
             self.pre_parts = []
         elif tag == "img":
-            src = attrs_dict.get("src") or attrs_dict.get("data-src")
-            if src:
+            src = attrs_dict.get("src") or attrs_dict.get("data-src") or attrs_dict.get("data-original") or attrs_dict.get("data-backsrc")
+            if src and "wx_fmt=svg" not in src and not src.startswith("data:image"):
+                data_width = attrs_dict.get("data-w")
+                if data_width and data_width.isdigit() and int(data_width) < 20:
+                    return
                 alt = attrs_dict.get("alt") or "image"
                 self._break()
                 self.parts.append(f"![{alt}]({self._absolute(src)})\n")

@@ -27,8 +27,8 @@ Keep this table aligned with both READMEs when platform support changes.
 
 | Platform | Status | Command | Notes |
 | --- | --- | --- | --- |
-| X/Twitter | Done | `content-capture x article` | Single article only. Do not add user timeline support unless the user explicitly changes direction. |
-| WeChat Official Account | Done | `content-capture wechat` | Supports single articles and collection-style knowledge bases. WeChat videos are intentionally not downloaded. |
+| X/Twitter | Done | `content-capture x article`, `content-capture x user` | Single article plus login-required user batch export with filters. |
+| WeChat Official Account | Done | `content-capture wechat`, `content-capture wechat account` | Supports single articles, collection-style knowledge bases, and login-required account batch export. WeChat videos are intentionally not downloaded. |
 | Normal web pages | Done | `content-capture web` | Uses built-in HTML extraction and Defuddle fallback. |
 | Xiaohongshu | Not done | none | Planned for image/video resources. |
 | Douyin | Not done | none | Planned for video resources. |
@@ -38,9 +38,8 @@ Keep this table aligned with both READMEs when platform support changes.
 
 ## Non-Negotiable Product Boundaries
 
-- X/Twitter only supports single article retrieval.
-- Do not reintroduce `content-capture x user`, top-level `user`, X official API token requirements, or X user timeline retrieval.
-- Do not restore the deleted official X API client path.
+- X/Twitter supports single article retrieval and login-required user batch export with filters.
+- Do not add a top-level `user` command, X official API token requirements, or a new official X API client path.
 - WeChat video download is intentionally out of scope for now. Keep WeChat output focused on text, images, and article structure.
 - Generated Markdown is meant for Obsidian. Prefer relative asset links by default.
 - Filenames and paths should be stable and cleaned for Obsidian usage.
@@ -52,8 +51,12 @@ Current public commands:
 
 ```bash
 content-capture x article <x-url-or-id> --out out
+content-capture x user <handle> --min-views 10w --original-only --out out
 content-capture wechat <mp.weixin-url> --out out
+content-capture wechat account <account-name> --min-reads 10w --out out
 content-capture web <url> --out out
+content-capture login x
+content-capture login wechat
 ```
 
 Compatibility aliases currently exist:
@@ -73,6 +76,10 @@ Prefer documenting the platform-specific commands, not the aliases.
 - `content_capture/defuddle.py`: normal URL fetching, HTML extraction, and Defuddle fallback.
 - `content_capture/html_markdown.py`: HTML to Markdown conversion, including WeChat-specific behavior.
 - `content_capture/wechat.py`: WeChat single/collection export and local link rewriting.
+- `content_capture/wechat_account.py`: WeChat account batch discovery, filtering, and output index writing.
+- `content_capture/x_batch.py`: X user batch discovery, filtering, hydration, and output index writing.
+- `content_capture/sessions.py`: login/session helpers shared with feedgrab.
+- `content_capture/metrics.py`: human count parsing for filters such as `10w` and `100k`.
 - `content_capture/xtomd.py`: X single article conversion through the public conversion path.
 - `content_capture/x_utils.py`: X URL detection and tweet id parsing only.
 - `content_capture/naming.py`: title and path cleanup.
@@ -134,14 +141,16 @@ python3 -m py_compile content_capture/*.py tests/*.py
 Search for forbidden or stale public wording after documentation changes:
 
 ```bash
-rg -n "抓|爬|X API|X_BEARER_TOKEN|官方|content-capture x user|content-capture user|--source|UserLongform|timeline|最近 N" README.md README.en.md content_capture tests
+rg -n "抓|爬|X API|X_BEARER_TOKEN|官方|content-capture user|--source|UserLongform|最近 N" README.md README.en.md content_capture tests
 ```
 
 That search should return no matches unless the user explicitly changed direction.
 
 ## Known Risks
 
-- X single article retrieval depends on the public conversion path used in `xtomd.py`; availability can change.
+- X single article retrieval depends on `twitter-cli` first and the public conversion path in `xtomd.py` as fallback; availability can change.
+- X user batch export depends on feedgrab's login session and X web GraphQL behavior. View counts can be absent in some responses.
+- WeChat account batch export depends on feedgrab's MP backend session. Read counts may be absent; the tool should track unknown metrics clearly.
 - WeChat can return verification or environment-error pages. The tool should fail clearly rather than writing bad Markdown.
 - Normal web extraction can fail on heavily client-rendered pages. Defuddle is the fallback, but it must be installed locally.
 - Local video preview in Markdown varies by renderer. The HTML preview exists because some Markdown previewers show raw `<video>` tags.
